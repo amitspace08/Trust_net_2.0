@@ -221,7 +221,20 @@ export async function getLayer2Candidates(uid: string) {
       }
     }
 
-    return Array.from(candidateMap.values());
+    const list = Array.from(candidateMap.values());
+    const result = [];
+    for (const item of list) {
+      const userRef = doc(db, "users", item.mutualConnectionUID);
+      const userSnap = await getDoc(userRef);
+      const mutualName = userSnap.exists()
+        ? (userSnap.data().name || userSnap.data().displayName)
+        : "Someone";
+      result.push({
+        ...item,
+        mutualConnectionName: mutualName,
+      });
+    }
+    return result;
   } catch (error) {
     console.error(error);
     throw error;
@@ -290,6 +303,7 @@ export async function rankLayer2Candidates(candidateUIDs: any[], distressedLocat
         phone: user.phone_no,
         distance,
         mutualConnectionUID: candidate.mutualConnectionUID,
+        mutualConnectionName: candidate.mutualConnectionName,
       });
     }
 

@@ -50,6 +50,13 @@ function SosEmergencyPage() {
     typeof window === "undefined" ? null : localStorage.getItem("trustnet_active_sos_session"),
   );
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [googlePoint, setGooglePoint] = useState<any>(null);
+
+  useEffect(() => {
+    if (isLoaded && typeof window !== "undefined" && (window as any).google) {
+      setGooglePoint(new (window as any).google.maps.Point(0, -30));
+    }
+  }, [isLoaded]);
 
   // Get location when component mounts (continuous tracking)
   useEffect(() => {
@@ -737,7 +744,7 @@ function SosEmergencyPage() {
             {isLayer3Escalated ? (
               <Circle
                 center={location}
-                radius={300}
+                radius={500}
                 options={{
                   strokeColor: "#f59e0b",
                   strokeOpacity: 0.8,
@@ -750,7 +757,7 @@ function SosEmergencyPage() {
             ) : isLayer2Escalated ? (
               <Circle
                 center={location}
-                radius={200}
+                radius={500}
                 options={{
                   strokeColor: "#0d9488",
                   strokeOpacity: 0.8,
@@ -777,17 +784,37 @@ function SosEmergencyPage() {
 
             {/* Nearest Safe Space Pin */}
             {nearestSpace && (
-              <Marker
-                position={{ lat: nearestSpace.latitude, lng: nearestSpace.longitude }}
-                label={{
-                  text: `Safe Space: ${nearestSpace.name}`,
-                  color: "#047857",
-                  fontWeight: "700",
-                }}
-                icon={{
-                  url: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
-                }}
-              />
+              <>
+                <Circle
+                  center={{ lat: nearestSpace.latitude, lng: nearestSpace.longitude }}
+                  radius={80} // 80m high-visibility pulsing highlight
+                  options={{
+                    strokeColor: "#10b981",
+                    strokeOpacity: 0.9,
+                    strokeWeight: 2,
+                    fillColor: "#10b981",
+                    fillOpacity: 0.15,
+                    clickable: false,
+                  }}
+                />
+                <Marker
+                  position={{ lat: nearestSpace.latitude, lng: nearestSpace.longitude }}
+                  label={{
+                    text: `Safe Space: ${nearestSpace.name}`,
+                    color: "#047857",
+                    fontWeight: "700",
+                  }}
+                  icon={googlePoint ? {
+                    path: "M -10,10 L -10,-6 L 0,-12 L 10,-6 L 10,10 Z M -6,10 L -6,4 L 6,4 L 6,10 Z",
+                    fillColor: "#10b981", // Emerald Green
+                    fillOpacity: 1.0,
+                    strokeColor: "#FFFFFF",
+                    strokeWeight: 2,
+                    scale: 1.1,
+                    labelOrigin: googlePoint,
+                  } : undefined}
+                />
+              </>
             )}
 
             {/* Dashed line to Nearest Safe Space */}
@@ -822,9 +849,15 @@ function SosEmergencyPage() {
                     color: "#0f766e",
                     fontWeight: "600",
                   }}
-                  icon={{
-                    url: "https://maps.google.com/mapfiles/ms/icons/ltblue-dot.png",
-                  }}
+                  icon={googlePoint ? {
+                    path: "M 0,0 C -2,-20 -10,-22 -10,-30 C -10,-36 -5,-40 0,-40 C 5,-40 10,-36 10,-30 C 10,-22 2,-20 0,0 Z",
+                    fillColor: "#0d9488", // Teal
+                    fillOpacity: 1,
+                    strokeColor: "#FFFFFF",
+                    strokeWeight: 1.5,
+                    scale: 0.9,
+                    labelOrigin: googlePoint,
+                  } : undefined}
                 />
                 <Marker
                   position={{ lat: location.lat - 0.002, lng: location.lng - 0.002 }}
@@ -833,9 +866,15 @@ function SosEmergencyPage() {
                     color: "#0f766e",
                     fontWeight: "600",
                   }}
-                  icon={{
-                    url: "https://maps.google.com/mapfiles/ms/icons/ltblue-dot.png",
-                  }}
+                  icon={googlePoint ? {
+                    path: "M 0,0 C -2,-20 -10,-22 -10,-30 C -10,-36 -5,-40 0,-40 C 5,-40 10,-36 10,-30 C 10,-22 2,-20 0,0 Z",
+                    fillColor: "#0d9488", // Teal
+                    fillOpacity: 1,
+                    strokeColor: "#FFFFFF",
+                    strokeWeight: 1.5,
+                    scale: 0.9,
+                    labelOrigin: googlePoint,
+                  } : undefined}
                 />
               </>
             )}
@@ -857,24 +896,32 @@ function SosEmergencyPage() {
                       color: isDeclined ? "#6b7280" : "#d97706",
                       fontWeight: "700",
                     }}
-                    icon={{
-                      url: isDeclined
-                        ? "https://maps.google.com/mapfiles/ms/icons/grey-dot.png"
+                    icon={googlePoint ? {
+                      path: "M 0,-15 L 12,-10 L 12,0 C 12,8 0,16 0,20 C 0,16 -12,8 -12,0 L -12,-10 Z",
+                      fillColor: isDeclined
+                        ? "#9CA3AF" // Grey for declined GA
                         : isActiveCandidate
-                          ? "https://maps.google.com/mapfiles/ms/icons/orange-dot.png"
-                          : "https://maps.google.com/mapfiles/ms/icons/yellow-dot.png",
-                    }}
+                          ? "#F59E0B" // Gold/Amber for active candidate
+                          : "#FCD34D", // Light gold for other GAs
+                      fillOpacity: 1,
+                      strokeColor: "#FFFFFF",
+                      strokeWeight: 1.5,
+                      scale: 1.1,
+                      labelOrigin: googlePoint,
+                    } : undefined}
                   />
                 );
               })}
 
             {/* Responding Helper route and Pin */}
-            {responderName && gaLocations.length > 0 && (
+            {responderName && (
               <>
                 <Polyline
                   path={[
                     location,
-                    { lat: gaLocations[0].latitude, lng: gaLocations[0].longitude },
+                    gaLocations.length > 0
+                      ? { lat: gaLocations[0].latitude, lng: gaLocations[0].longitude }
+                      : { lat: location.lat + 0.002, lng: location.lng + 0.002 },
                   ]}
                   options={{
                     strokeColor: "#3b82f6",
@@ -883,15 +930,25 @@ function SosEmergencyPage() {
                   }}
                 />
                 <Marker
-                  position={{ lat: gaLocations[0].latitude, lng: gaLocations[0].longitude }}
+                  position={
+                    gaLocations.length > 0
+                      ? { lat: gaLocations[0].latitude, lng: gaLocations[0].longitude }
+                      : { lat: location.lat + 0.002, lng: location.lng + 0.002 }
+                  }
                   label={{
                     text: `${responderName} (Responding!)`,
                     color: "#1d4ed8",
                     fontWeight: "800",
                   }}
-                  icon={{
-                    url: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
-                  }}
+                  icon={googlePoint ? {
+                    path: "M 0,0 C -2,-20 -10,-22 -10,-30 C -10,-36 -5,-40 0,-40 C 5,-40 10,-36 10,-30 C 10,-22 2,-20 0,0 Z",
+                    fillColor: "#3b82f6", // Blue
+                    fillOpacity: 1,
+                    strokeColor: "#FFFFFF",
+                    strokeWeight: 1.5,
+                    scale: 1.0,
+                    labelOrigin: googlePoint,
+                  } : undefined}
                 />
               </>
             )}

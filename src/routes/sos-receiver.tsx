@@ -278,7 +278,7 @@ function SosReceiverPage() {
   const distressPosFuzzy = getMapPosition(fuzzyCoords.lat, fuzzyCoords.lng);
   
   // Decide which position to show for distress user
-  const showFuzzy = isLayer2 || (isLayer3 && receiverState !== "responding");
+  const showFuzzy = (isLayer2 || isLayer3) && receiverState !== "responding";
   const distressPos = showFuzzy ? distressPosFuzzy : distressPosExact;
   
   const responderPos = getMapPosition(responderLat, responderLng);

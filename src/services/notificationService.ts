@@ -83,6 +83,11 @@ export async function notifyLayer1(sessionId: string) {
     if (!snap.exists()) return;
 
     const data = snap.data();
+    
+    // Fetch distressed user's display name
+    const userRef = doc(db, "users", data.triggeredBy);
+    const userSnap = await getDoc(userRef);
+    const userName = userSnap.exists() ? (userSnap.data().name || userSnap.data().displayName) : "Someone";
 
     const contacts = data.layer1Alerted || [];
 
@@ -91,7 +96,7 @@ export async function notifyLayer1(sessionId: string) {
         uid,
         data.triggeredBy,
         "SOS Alert",
-        "Emergency assistance required.",
+        `${userName} has triggered an SOS — they need help now`,
         "SOS",
         { sessionId, deepLink: `/sos-receiver?sessionId=${sessionId}&role=layer1` },
       );
@@ -217,7 +222,7 @@ export async function notifyLayer2(
       const mutual = await getMutualConnection(distressedUID, uid);
 
       const message = mutual
-        ? `${mutual.displayName}'s trusted friend needs emergency assistance nearby.`
+        ? `A friend of ${mutual.name || mutual.displayName || "Someone"} needs help near you. Can you assist?`
         : "A nearby user needs emergency assistance.";
 
       await sendNotification(uid, distressedUID, "Layer 2 SOS Alert", message, "LAYER2_SOS", {
@@ -244,7 +249,7 @@ export async function notifyNextCandidate(
     const mutual = await getMutualConnection(distressedUID, nextCandidateUID);
 
     const message = mutual
-      ? `${mutual.displayName}'s trusted friend still needs emergency help.`
+      ? `A friend of ${mutual.name || mutual.displayName || "Someone"} needs help near you. Can you assist?`
       : "Emergency assistance is still required nearby.";
 
     await sendNotification(

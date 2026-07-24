@@ -372,6 +372,7 @@ export async function getSOSSession(sessionId: string) {
 // =======================================
 export async function triggerLayer2(sessionId: string, distressedLocation: GeoPoint) {
   try {
+    console.log("Layer 1 timeout — ready for Layer 2 escalation");
     const session = await getSOSSession(sessionId);
 
     if (!session) {
@@ -506,7 +507,7 @@ export function startLayer2Timeout(sessionId: string) {
     } catch (err) {
       console.error("Error during Layer 2 timeout escalation:", err);
     }
-  }, 90_000);
+  }, 120_000);
 
   timers.layer2Timeout = timeout;
   sosTimers.set(sessionId, timers);
