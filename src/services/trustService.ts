@@ -12,6 +12,7 @@ import {
 } from "firebase/firestore";
 
 import { db } from "../firebase/firebase";
+import { getUser } from "./userService";
 
 /**
  * Firestore Collection
@@ -54,6 +55,26 @@ export async function sendTrustRequest(fromUID: string, toUID: string) {
       createdAt: serverTimestamp(),
     });
 
+    try {
+      const senderUser = await getUser(fromUID);
+      const senderName = senderUser?.name || senderUser?.displayName || "Someone";
+      await addDoc(collection(db, "notifications"), {
+        receiverUID: toUID,
+        senderUID: fromUID,
+        receiver: toUID,
+        sender: fromUID,
+        title: "Trust Circle Request",
+        message: `${senderName} sent you a trust request.`,
+        type: "trust_request",
+        createdAt: serverTimestamp(),
+        timestamp: serverTimestamp(),
+        read: false,
+        deepLink: "/circle",
+      });
+    } catch (nErr) {
+      console.warn("Failed to send notification for trust request:", nErr);
+    }
+
     return docRef.id;
   } catch (error) {
     console.error("sendTrustRequest:", error);
@@ -66,9 +87,35 @@ export async function sendTrustRequest(fromUID: string, toUID: string) {
 // =========================
 export async function acceptRequest(requestID: string) {
   try {
-    await updateDoc(doc(db, "trust_relationships", requestID), {
+    const relRef = doc(db, "trust_relationships", requestID);
+    const relSnap = await getDoc(relRef);
+    if (!relSnap.exists()) {
+      throw new Error("Relationship not found.");
+    }
+    const relData = relSnap.data();
+    await updateDoc(relRef, {
       status: "accepted",
     });
+
+    try {
+      const acceptorUser = await getUser(relData.userB);
+      const acceptorName = acceptorUser?.name || acceptorUser?.displayName || "Someone";
+      await addDoc(collection(db, "notifications"), {
+        receiverUID: relData.userA,
+        senderUID: relData.userB,
+        receiver: relData.userA,
+        sender: relData.userB,
+        title: "Trust Request Accepted",
+        message: `${acceptorName} accepted your trust request.`,
+        type: "trust_accept",
+        createdAt: serverTimestamp(),
+        timestamp: serverTimestamp(),
+        read: false,
+        deepLink: "/circle",
+      });
+    } catch (nErr) {
+      console.warn("Failed to send notification for trust accept:", nErr);
+    }
   } catch (error) {
     console.error(error);
     throw error;
@@ -135,28 +182,7 @@ export async function searchUserByPhone(phone: string) {
   }
 }
 
-// =========================
-// Optional Helper
-// =========================
-export async function getUser(uid: string) {
-  try {
-    const ref = doc(db, "users", uid);
-
-    const snap = await getDoc(ref);
-
-    if (!snap.exists()) {
-      return null;
-    }
-
-    return {
-      id: snap.id,
-      ...(snap.data() as any),
-    };
-  } catch (error) {
-    console.error(error);
-    throw error;
-  }
-}
+// getUser is imported from userService
 
 // =========================
 // Layer 2 Candidates

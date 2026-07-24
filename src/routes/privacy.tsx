@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { HtmlPage } from "../lib/html-page";
+import { useAuth } from "../lib/auth";
 
 const HTML = `
 <!-- TopAppBar (Mobile Only) / Header (Web) -->
@@ -151,9 +152,33 @@ export const Route = createFileRoute("/privacy")({
 });
 
 function Page() {
+  const { user } = useAuth();
+  const avatarUrl = user?.avatar || user?.profile_photo || "";
+  const userName = user?.name || "User";
+
+  const isPlaceholder = !avatarUrl || avatarUrl.includes("aida-public") || avatarUrl.includes("dicebear");
+  const initial = (userName || "U").trim().charAt(0).toUpperCase();
+  const bgClasses = ["bg-blue-600", "bg-emerald-600", "bg-indigo-600", "bg-purple-600", "bg-rose-600", "bg-amber-600", "bg-teal-600", "bg-cyan-600"];
+  const charCode = userName.trim().charCodeAt(0) || 0;
+  const bgColor = bgClasses[charCode % bgClasses.length];
+
+  const avatarHTML = isPlaceholder
+    ? `<div class="w-12 h-12 rounded-full flex items-center justify-center font-bold uppercase text-white ${bgColor} border border-white/10 shrink-0 select-none text-base">${initial}</div>`
+    : `<img alt="User Profile" class="w-12 h-12 rounded-full object-cover border border-gray-100" src="${avatarUrl}">`;
+
+  const dynamicHTML = HTML
+    .replace(
+      '<img alt="User Profile" class="w-12 h-12 rounded-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBx1s7cKAePJFBmHojTu4cZFC5UuKj7jy18bCo1PM4SW_Vq5HYCCIWn0KyQnEhANOITgjZ26GcVwUeRHxoReatAnGazD1zxMKBI_VAR8nw3wmyMACxViNWxxjWKsY65vV9JapMbu3sUJ8E_GtOE9bhZVbsq_BDxFZWuatWbgXcZTrsz4dLzZ3Y_CsHGbVN-qt2bFi2MogcVI7L3uTSjiqjH2qo_WG1uJvJ8opyJqJ1uc15T-26Wlw-qNL4n_tMsUpUtWgG0AQUkufcK">',
+      avatarHTML
+    )
+    .replaceAll(
+      'User Name',
+      userName
+    );
+
   return (
     <HtmlPage
-      html={HTML}
+      html={dynamicHTML}
       className="bg-background text-on-background min-h-screen flex flex-col font-body-md antialiased md:flex-row overflow-x-hidden pb-20 md:pb-0"
     />
   );

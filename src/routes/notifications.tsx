@@ -1,5 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAuth } from "../lib/auth";
+import { subscribeToNotifications } from "../services/notificationListener";
+import { markNotificationRead } from "../services/readNotification";
+import { db } from "../firebase/firebase";
+import { doc, deleteDoc, writeBatch, getDocs, collection, query, where } from "firebase/firestore";
 
 export const Route = createFileRoute("/notifications")({
   head: () => ({ meta: [{ title: "TrustNet — Notifications" }] }),
@@ -15,44 +20,87 @@ type N = {
   tone: "info" | "warn" | "ok";
 };
 
-const SEED: N[] = [
-  {
-    id: "1",
-    icon: "warning",
-    title: "Incident reported nearby",
-    body: "Suspicious activity reported 320m from your location.",
-    time: "2m",
-    tone: "warn",
-  },
-  {
-    id: "2",
-    icon: "verified_user",
-    title: "Guardian approved",
-    body: "Rahul accepted your guardian request.",
-    time: "1h",
-    tone: "ok",
-  },
-  {
-    id: "3",
-    icon: "location_on",
-    title: "Geofence entered",
-    body: "You arrived at Home safely.",
-    time: "3h",
-    tone: "info",
-  },
-  {
-    id: "4",
-    icon: "groups",
-    title: "Circle update",
-    body: "Aisha shared her live location with you.",
-    time: "Yesterday",
-    tone: "info",
-  },
-];
-
 function NotificationsPage() {
-  const [items, setItems] = useState(SEED);
-  const clear = () => setItems([]);
+  const { user } = useAuth();
+  const [items, setItems] = useState<N[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribe = subscribeToNotifications(user.id, (data: any[]) => {
+      const mapped = data.map((n) => {
+        let icon = "info";
+        let tone: "info" | "warn" | "ok" = "info";
+
+        if (n.type === "SOS" || n.type?.includes("SOS")) {
+          icon = "warning";
+          tone = "warn";
+        } else if (n.type === "trust_accept") {
+          icon = "verified_user";
+          tone = "ok";
+        } else if (n.type === "trust_request") {
+          icon = "group_add";
+          tone = "info";
+        }
+
+        let timeStr = "Just now";
+        if (n.createdAt) {
+          const date = n.createdAt.toDate ? n.createdAt.toDate() : new Date(n.createdAt.seconds * 1000);
+          const diffMs = Date.now() - date.getTime();
+          const diffMins = Math.floor(diffMs / 60000);
+          if (diffMins < 1) timeStr = "Just now";
+          else if (diffMins < 60) timeStr = `${diffMins}m`;
+          else {
+            const diffHours = Math.floor(diffMins / 60);
+            if (diffHours < 24) timeStr = `${diffHours}h`;
+            else timeStr = date.toLocaleDateString();
+          }
+        }
+
+        return {
+          id: n.id,
+          icon,
+          title: n.title || "Notification",
+          body: n.message || "",
+          time: timeStr,
+          tone,
+        };
+      });
+      setItems(mapped);
+
+      // Auto-mark notifications as read when viewed
+      data.forEach((n) => {
+        if (!n.read) {
+          markNotificationRead(n.id).catch(console.error);
+        }
+      });
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const clear = async () => {
+    if (!user) return;
+    try {
+      const q = query(collection(db, "notifications"), where("receiverUID", "==", user.id));
+      const snap = await getDocs(q);
+      const batch = writeBatch(db);
+      snap.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      await batch.commit();
+    } catch (err) {
+      console.error("Failed to clear notifications:", err);
+    }
+  };
+
+  const dismissItem = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "notifications", id));
+    } catch (err) {
+      console.error("Failed to delete notification:", err);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#faf9fc] pb-24 md:pb-8">
@@ -92,7 +140,7 @@ function NotificationsPage() {
               <p className="text-sm text-gray-600 mt-0.5">{n.body}</p>
             </div>
             <button
-              onClick={() => setItems((s) => s.filter((x) => x.id !== n.id))}
+              onClick={() => dismissItem(n.id)}
               className="material-symbols-outlined text-gray-400 self-start"
               style={{ fontSize: 18 }}
               aria-label="Dismiss"

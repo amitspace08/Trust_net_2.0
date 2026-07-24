@@ -23,6 +23,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as HeatmapRouteImport } from './routes/heatmap'
 import { Route as GuardianRouteImport } from './routes/guardian'
+import { Route as DebugUsersRouteImport } from './routes/debug-users'
 import { Route as CircleRouteImport } from './routes/circle'
 import { Route as CheckInRouteImport } from './routes/check-in'
 import { Route as AddContactRouteImport } from './routes/add-contact'
@@ -98,6 +99,11 @@ const GuardianRoute = GuardianRouteImport.update({
   path: '/guardian',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DebugUsersRoute = DebugUsersRouteImport.update({
+  id: '/debug-users',
+  path: '/debug-users',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CircleRoute = CircleRouteImport.update({
   id: '/circle',
   path: '/circle',
@@ -124,6 +130,7 @@ export interface FileRoutesByFullPath {
   '/add-contact': typeof AddContactRoute
   '/check-in': typeof CheckInRoute
   '/circle': typeof CircleRoute
+  '/debug-users': typeof DebugUsersRoute
   '/guardian': typeof GuardianRoute
   '/heatmap': typeof HeatmapRoute
   '/history': typeof HistoryRoute
@@ -144,6 +151,7 @@ export interface FileRoutesByTo {
   '/add-contact': typeof AddContactRoute
   '/check-in': typeof CheckInRoute
   '/circle': typeof CircleRoute
+  '/debug-users': typeof DebugUsersRoute
   '/guardian': typeof GuardianRoute
   '/heatmap': typeof HeatmapRoute
   '/history': typeof HistoryRoute
@@ -165,6 +173,7 @@ export interface FileRoutesById {
   '/add-contact': typeof AddContactRoute
   '/check-in': typeof CheckInRoute
   '/circle': typeof CircleRoute
+  '/debug-users': typeof DebugUsersRoute
   '/guardian': typeof GuardianRoute
   '/heatmap': typeof HeatmapRoute
   '/history': typeof HistoryRoute
@@ -187,6 +196,7 @@ export interface FileRouteTypes {
     | '/add-contact'
     | '/check-in'
     | '/circle'
+    | '/debug-users'
     | '/guardian'
     | '/heatmap'
     | '/history'
@@ -207,6 +217,7 @@ export interface FileRouteTypes {
     | '/add-contact'
     | '/check-in'
     | '/circle'
+    | '/debug-users'
     | '/guardian'
     | '/heatmap'
     | '/history'
@@ -227,6 +238,7 @@ export interface FileRouteTypes {
     | '/add-contact'
     | '/check-in'
     | '/circle'
+    | '/debug-users'
     | '/guardian'
     | '/heatmap'
     | '/history'
@@ -248,6 +260,7 @@ export interface RootRouteChildren {
   AddContactRoute: typeof AddContactRoute
   CheckInRoute: typeof CheckInRoute
   CircleRoute: typeof CircleRoute
+  DebugUsersRoute: typeof DebugUsersRoute
   GuardianRoute: typeof GuardianRoute
   HeatmapRoute: typeof HeatmapRoute
   HistoryRoute: typeof HistoryRoute
@@ -364,6 +377,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GuardianRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/debug-users': {
+      id: '/debug-users'
+      path: '/debug-users'
+      fullPath: '/debug-users'
+      preLoaderRoute: typeof DebugUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/circle': {
       id: '/circle'
       path: '/circle'
@@ -400,6 +420,7 @@ const rootRouteChildren: RootRouteChildren = {
   AddContactRoute: AddContactRoute,
   CheckInRoute: CheckInRoute,
   CircleRoute: CircleRoute,
+  DebugUsersRoute: DebugUsersRoute,
   GuardianRoute: GuardianRoute,
   HeatmapRoute: HeatmapRoute,
   HistoryRoute: HistoryRoute,

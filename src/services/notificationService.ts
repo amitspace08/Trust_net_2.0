@@ -10,7 +10,8 @@ import {
 } from "firebase/firestore";
 
 import { db } from "../firebase/firebase";
-import { getMutualConnection, getUser } from "./trustService";
+import { getMutualConnection } from "./trustService";
+import { getUser } from "./userService";
 /*
 notifications
 

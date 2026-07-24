@@ -2,6 +2,7 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useAuth } from "../lib/auth";
 import { stopSharing, updateMyLocation } from "../services/locationService";
+import { UserAvatar } from "../components/ui/UserAvatar";
 
 export const Route = createFileRoute("/profile")({
   head: () => ({
@@ -12,6 +13,7 @@ export const Route = createFileRoute("/profile")({
 
 function ProfilePage() {
   const { user, logout } = useAuth();
+  const avatarUrl = user?.avatar || user?.profile_photo || "";
   const router = useRouter();
   const [sharingLocation, setSharingLocation] = useState(true);
   const [isGuardianAngel, setIsGuardianAngel] = useState(false);
@@ -71,10 +73,11 @@ function ProfilePage() {
       {/* NavigationDrawer (Web Only) */}
       <nav className="hidden md:flex flex-col bg-white text-gray-800 h-full rounded-r-2xl shadow-sm border-r border-gray-150 w-72 max-w-[80vw] p-5 fixed left-0 top-0 z-50">
         <div className="flex items-center gap-4 mb-8 pt-4">
-          <img
-            alt="User Profile"
-            className="w-12 h-12 rounded-full object-cover border border-gray-100"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuCWpKa7rM0MgxTGa8wnfmmRkJeuGrzTo8jtAmjh4fqS-GiR5uxyDguW4QfV0cpJwBalWWxWMi9c-g6ZEjsg_Vj1IxropD6jiDRVi_0LRMNdlWAM0CaWPXnQjNSAvaqLi06IE69BRgSRKjN4BCRb3LwMft0l0Qrdynv2dm5l12QmFntTea0P2AeCWygqodfIfwXzVOdcOJH_IkGyPJGnmwA5I_B7U7YJbi_DP3FxhUYWqpfKToHJefY-1b88Qdnd-m_r3Xy4yXbRyUBP"
+          <UserAvatar
+            name={user?.name || "Priya Sharma"}
+            avatarUrl={avatarUrl}
+            sizeClassName="w-12 h-12 text-base font-semibold"
+            className="border border-gray-100"
           />
           <div>
             <h2 className="text-sm font-bold text-gray-900">{user?.name || "Priya Sharma"}</h2>
@@ -203,10 +206,10 @@ function ProfilePage() {
         <section className="flex flex-col items-center text-center gap-4">
           <div className="relative inline-block">
             <div className="w-24 h-24 md:w-32 md:h-32 rounded-full overflow-hidden border-4 border-white shadow-sm relative bg-gray-100">
-              <img
-                alt="Profile Avatar"
-                className="w-full h-full object-cover"
-                src="https://lh3.googleusercontent.com/aida-public/AB6AXuBZM9vRfoXlLfczSOKoGzm8o_1cUDAv_-qMMoWB_Z-Q6jdC1CzrLiTKW2m-RDoHYSlI9ScK-JwC--ScDqQEyfCyK3Ftsuw0Jzy869FrGH0IUq8F5gwrjaCQWawwFoQHB9wKrzbdUplsubuimLiJqTkMbkT_Q6foqAS21FJJgO90mnoX5p86h_on0YnmzinwiDcFIs5WSRxR5USAxLkHUEg8cXc96iGu7dR77EoudclAgsVkL-Rp-q_hK-14rlZEqwLrGrMqa1a7IkV7"
+              <UserAvatar
+                name={user?.name || "Elena Rodriguez"}
+                avatarUrl={avatarUrl}
+                sizeClassName="w-24 h-24 md:w-32 md:h-32 text-3xl font-extrabold"
               />
             </div>
 

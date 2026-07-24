@@ -1,6 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useAuth } from "../lib/auth";
+import { getDistance } from "../services/guardianService";
+import { UserAvatar } from "../components/ui/UserAvatar";
 import { loadContacts, Contact } from "../lib/contacts-db";
 
 export const Route = createFileRoute("/heatmap")({
@@ -12,6 +14,7 @@ export const Route = createFileRoute("/heatmap")({
 
 function HeatmapPage() {
   const { user } = useAuth();
+  const avatarUrl = user?.avatar || user?.profile_photo || "";
   const navigate = useNavigate();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
@@ -150,10 +153,11 @@ function HeatmapPage() {
       {/* NavigationDrawer (Web Only) */}
       <nav className="hidden md:flex flex-col bg-white text-gray-800 h-full rounded-r-2xl shadow-sm border-r border-gray-150 w-72 max-w-[80vw] p-5 fixed left-0 top-0 z-50">
         <div className="flex items-center gap-4 mb-8 pt-4">
-          <img
-            alt="User Profile"
-            className="w-12 h-12 rounded-full object-cover border border-gray-100"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuCWpKa7rM0MgxTGa8wnfmmRkJeuGrzTo8jtAmjh4fqS-GiR5uxyDguW4QfV0cpJwBalWWxWMi9c-g6ZEjsg_Vj1IxropD6jiDRVi_0LRMNdlWAM0CaWPXnQjNSAvaqLi06IE69BRgSRKjN4BCRb3LwMft0l0Qrdynv2dm5l12QmFntTea0P2AeCWygqodfIfwXzVOdcOJH_IkGyPJGnmwA5I_B7U7YJbi_DP3FxhUYWqpfKToHJefY-1b88Qdnd-m_r3Xy4yXbRyUBP"
+          <UserAvatar
+            name={user?.name || "User"}
+            avatarUrl={avatarUrl}
+            sizeClassName="w-12 h-12 text-base font-semibold"
+            className="border border-gray-100"
           />
           <div>
             <h2 className="text-sm font-bold text-gray-900">{user?.name || "Priya Sharma"}</h2>
@@ -386,10 +390,10 @@ function HeatmapPage() {
               {c.shareLocation ? (
                 // Location Sharing ON: Show user avatar
                 <div className="relative w-full h-full rounded-full overflow-hidden p-0.5">
-                  <img
-                    alt={c.name}
-                    src={c.avatar}
-                    className="w-full h-full rounded-full object-cover"
+                  <UserAvatar
+                    name={c.name}
+                    avatarUrl={c.avatar}
+                    sizeClassName="w-full h-full text-xs font-semibold"
                   />
                   {/* Status dot indicator (online/offline) on avatar */}
                   <span
@@ -421,10 +425,11 @@ function HeatmapPage() {
               <div className="flex justify-between items-start">
                 <div className="flex items-center gap-3.5">
                   <div className="relative">
-                    <img
-                      alt={selectedContact.name}
-                      src={selectedContact.avatar}
-                      className={`w-12 h-12 rounded-full object-cover border-2 ${
+                    <UserAvatar
+                      name={selectedContact.name}
+                      avatarUrl={selectedContact.avatar}
+                      sizeClassName="w-12 h-12 text-base font-semibold"
+                      className={`border-2 ${
                         selectedContact.shareLocation
                           ? "border-[#0d631b]/30"
                           : "border-gray-200 grayscale"

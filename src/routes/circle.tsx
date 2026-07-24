@@ -17,6 +17,7 @@ import {
   deleteDoc,
 } from "firebase/firestore";
 import { acceptRequest, rejectRequest } from "../services/trustService";
+import { UserAvatar } from "../components/ui/UserAvatar";
 
 export const Route = createFileRoute("/circle")({
   head: () => ({
@@ -50,6 +51,7 @@ interface CustomContact extends Contact {
 
 function TrustCirclePage() {
   const { user } = useAuth();
+  const avatarUrl = user?.avatar || user?.profile_photo || "";
   const router = useRouter();
 
   const [contacts, setContacts] = useState<CustomContact[]>([]);
@@ -262,10 +264,11 @@ function TrustCirclePage() {
       {/* NavigationDrawer (Web Only) */}
       <nav className="hidden md:flex flex-col bg-white text-gray-800 h-full rounded-r-2xl shadow-sm border-r border-gray-150 w-72 max-w-[80vw] p-5 fixed left-0 top-0 z-50">
         <div className="flex items-center gap-4 mb-8 pt-4">
-          <img
-            alt="User Profile"
-            className="w-12 h-12 rounded-full object-cover border border-gray-100"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuCWpKa7rM0MgxTGa8wnfmmRkJeuGrzTo8jtAmjh4fqS-GiR5uxyDguW4QfV0cpJwBalWWxWMi9c-g6ZEjsg_Vj1IxropD6jiDRVi_0LRMNdlWAM0CaWPXnQjNSAvaqLi06IE69BRgSRKjN4BCRb3LwMft0l0Qrdynv2dm5l12QmFntTea0P2AeCWygqodfIfwXzVOdcOJH_IkGyPJGnmwA5I_B7U7YJbi_DP3FxhUYWqpfKToHJefY-1b88Qdnd-m_r3Xy4yXbRyUBP"
+          <UserAvatar
+            name={user?.name || "User"}
+            avatarUrl={avatarUrl}
+            sizeClassName="w-12 h-12 text-base font-semibold"
+            className="border border-gray-100"
           />
           <div>
             <h2 className="text-sm font-bold text-gray-900">{user?.name || "Priya Sharma"}</h2>
@@ -427,14 +430,15 @@ function TrustCirclePage() {
                     <div className="flex items-center gap-3.5">
                       {/* Avatar with Online/Offline Indicator */}
                       <div className="relative">
-                        <img
-                          alt={`${c.name} Profile`}
-                          className={`w-12 h-12 rounded-full object-cover border-2 ${
+                        <UserAvatar
+                          name={c.name}
+                          avatarUrl={c.avatar}
+                          sizeClassName="w-12 h-12 text-base font-semibold"
+                          className={`border-2 ${
                             c.status === "Active"
                               ? "border-[#0d631b]/30"
                               : "border-gray-200 grayscale"
                           }`}
-                          src={c.avatar}
                         />
                         {/* Visual indicator of online status */}
                         <span
@@ -544,10 +548,11 @@ function TrustCirclePage() {
                       >
                         <div className="flex items-center gap-3">
                           <div className="relative">
-                            <img
-                              alt={r.name}
-                              src={r.avatar}
-                              className="w-10 h-10 rounded-full object-cover border border-gray-100"
+                            <UserAvatar
+                              name={r.name}
+                              avatarUrl={r.avatar}
+                              sizeClassName="w-10 h-10 text-xs font-semibold"
+                              className="border border-gray-100"
                             />
                             <span
                               className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-white ${
@@ -607,10 +612,11 @@ function TrustCirclePage() {
                         }`}
                       >
                         <div className="flex items-center gap-3">
-                          <img
-                            alt={r.name}
-                            src={r.avatar}
-                            className="w-8 h-8 rounded-full object-cover grayscale"
+                          <UserAvatar
+                            name={r.name}
+                            avatarUrl={r.avatar}
+                            sizeClassName="w-8 h-8 text-[10px] font-bold"
+                            className="grayscale"
                           />
                           <div>
                             <p className="font-semibold text-xs text-gray-700">{r.name}</p>
@@ -670,10 +676,11 @@ function TrustCirclePage() {
               <div className="p-3 bg-gray-50/50 hover:bg-gray-50 border border-gray-100 rounded-xl flex items-center justify-between transition">
                 <div className="flex items-center gap-3">
                   <div className="relative">
-                    <img
-                      alt="Rahul Sharma"
-                      className="w-10 h-10 rounded-full object-cover border border-gray-100"
-                      src="https://lh3.googleusercontent.com/aida-public/AB6AXuBqKJau6jwMTr6vH6d26Tv1qITburRYz5wRShmY_rp2XWgZwlsXLRNIMprBXGfg3xXzitKpE8W2f0CTQ_ss8J8V3-COU8_KlfOYetVtYGoaBJnVUDQ7arjALd787_L-ETvHWv0IlhC1cftMJATFEEdl-pBEpD_J-CsOsIIocB9dBKBtkWT0RY_cWs4igh9MPAc2YdebZYLyTGZ_HdlZGrzFjMEEScMjznDRa28mL86-k4hoZRkAtLYj7rT4-xIsyoM3yronrBklG06K"
+                    <UserAvatar
+                      name="Rahul Sharma"
+                      avatarUrl=""
+                      sizeClassName="w-10 h-10 text-xs font-bold"
+                      className="border border-gray-100"
                     />
                     <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5">
                       <span className="material-symbols-outlined text-[10px] text-white bg-[#005faf] rounded-full p-0.5">
@@ -703,10 +710,11 @@ function TrustCirclePage() {
               <div className="p-3 bg-gray-50/50 hover:bg-gray-50 border border-gray-100 rounded-xl flex items-center justify-between transition">
                 <div className="flex items-center gap-3">
                   <div className="relative">
-                    <img
-                      alt="Sara Jones"
-                      className="w-10 h-10 rounded-full object-cover border border-gray-100"
-                      src="https://lh3.googleusercontent.com/aida-public/AB6AXuCz7NXTobBoxZS1LdenK3OFVM6-ycj1Al0vdt_05W4mAnVc1HKeAU5X0wjI4mOW_96iJATXDwzN-KX96CFeKDO8aO5kU1HyKVdYegXeE9YTmQb2Kix9oUmHDQEHhucM6cypQ8UlakJgcpMGTHzXNQkEjTfm_AzkyYwrEfI9Smfr9IQDRqdex7Wv-1va9Yfj7UROZo-uWN3zTHBjlrZ-dZeQpt1dseQjejo3DphHZV9e69BUGJ_0bUb_2zzgaycMWMNkgSGKmHcq05Zn"
+                    <UserAvatar
+                      name="Sara Jones"
+                      avatarUrl=""
+                      sizeClassName="w-10 h-10 text-xs font-bold"
+                      className="border border-gray-100"
                     />
                     <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5">
                       <span className="material-symbols-outlined text-[10px] text-white bg-[#005faf] rounded-full p-0.5">

@@ -1,14 +1,20 @@
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { useAuth } from "../lib/auth";
+import { db } from "../firebase/firebase";
 import {
-  loadContacts,
-  saveContacts,
-  loadRequests,
-  saveRequests,
-  MOCK_USER_DIRECTORY,
-  Contact,
-  ContactRequest,
-} from "../lib/contacts-db";
+  collection,
+  query,
+  where,
+  getDocs,
+  addDoc,
+  deleteDoc,
+  doc,
+  serverTimestamp,
+  onSnapshot,
+  getDoc,
+} from "firebase/firestore";
+import { UserAvatar } from "../components/ui/UserAvatar";
 
 export const Route = createFileRoute("/add-contact")({
   head: () => ({ meta: [{ title: "TrustNet — Add Contact" }] }),
@@ -16,147 +22,224 @@ export const Route = createFileRoute("/add-contact")({
 });
 
 function AddContactPage() {
+  const { user } = useAuth();
   const router = useRouter();
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [requests, setRequests] = useState<ContactRequest[]>([]);
-  const [customName, setCustomName] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [searchResult, setSearchResult] = useState<any | null>(null);
+  const [searched, setSearched] = useState(false);
   const [customRelation, setCustomRelation] = useState("Friend");
-  const [showCustomForm, setShowCustomForm] = useState(false);
+  const [inviteSuccess, setInviteSuccess] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [sendingInvite, setSendingInvite] = useState(false);
+  const [contacts, setContacts] = useState<any[]>([]);
 
-  // Load state on mount
+  // 1. Sync current contacts from Firestore trust_relationships
   useEffect(() => {
-    setContacts(loadContacts());
-    setRequests(loadRequests());
-  }, []);
+    if (!user) return;
 
-  const updateContacts = (newContacts: Contact[]) => {
-    setContacts(newContacts);
-    saveContacts(newContacts);
-  };
-
-  const updateRequests = (newRequests: ContactRequest[]) => {
-    setRequests(newRequests);
-    saveRequests(newRequests);
-  };
-
-  // Remove contact from Layer 1
-  const removeContact = (id: string) => {
-    const next = contacts.filter((c) => c.id !== id);
-    updateContacts(next);
-  };
-
-  // Send request to a user from directory
-  const handleSendRequest = (
-    name: string,
-    phone: string,
-    relation: string,
-    avatar: string,
-    online: boolean,
-  ) => {
-    const newRequest: ContactRequest = {
-      id: crypto.randomUUID(),
-      name,
-      phone,
-      relation,
-      avatar,
-      online,
-      type: "outgoing",
-      status: "Pending",
-      at: Date.now(),
-    };
-    const next = [newRequest, ...requests];
-    updateRequests(next);
-  };
-
-  // Cancel outgoing pending request
-  const handleCancelRequest = (phone: string) => {
-    const next = requests.filter((r) => r.phone !== phone);
-    updateRequests(next);
-  };
-
-  // Accept incoming pending request
-  const handleAcceptRequest = (phone: string) => {
-    const req = requests.find((r) => r.phone === phone && r.type === "incoming");
-    if (!req) return;
-
-    // Change status of request to Accepted
-    const nextRequests = requests.map((r) =>
-      r.phone === phone && r.type === "incoming" ? { ...r, status: "Accepted" as const } : r,
+    const qAccepted = query(
+      collection(db, "trust_relationships"),
+      where("status", "==", "accepted")
     );
-    updateRequests(nextRequests);
 
-    const directoryUser = MOCK_USER_DIRECTORY.find((u) => u.phone === req.phone);
-    const newContact: Contact = {
-      id: crypto.randomUUID(),
-      name: req.name,
-      phone: req.phone,
-      relation: req.relation,
-      avatar: req.avatar,
-      online: req.online,
-      status: "Active",
-      at: Date.now(),
-      shareLocation: directoryUser ? directoryUser.shareLocation : true,
-      lastUpdated: directoryUser ? directoryUser.lastUpdated : "Just now",
-      distance: directoryUser ? directoryUser.distance : "Unknown",
-      latitude: directoryUser ? directoryUser.latitude : 12.9716,
-      longitude: directoryUser ? directoryUser.longitude : 77.5946,
-    };
-    updateContacts([newContact, ...contacts]);
-  };
+    const unsubscribe = onSnapshot(qAccepted, async (snapshot) => {
+      try {
+        const list: any[] = [];
+        for (const docSnap of snapshot.docs) {
+          const data = docSnap.data();
+          if (data.userA === user.id || data.userB === user.id) {
+            const contactUid = data.userA === user.id ? data.userB : data.userA;
 
-  // Reject incoming pending request
-  const handleRejectRequest = (phone: string) => {
-    const nextRequests = requests.map((r) =>
-      r.phone === phone && r.type === "incoming" ? { ...r, status: "Rejected" as const } : r,
-    );
-    updateRequests(nextRequests);
-  };
+            const userRef = doc(db, "users", contactUid);
+            const userSnap = await getDoc(userRef);
+            if (userSnap.exists()) {
+              const uData = userSnap.data();
+              list.push({
+                id: contactUid,
+                relationshipId: docSnap.id,
+                name: uData.name || uData.displayName || "Contact",
+                phone: uData.phone || uData.phone_no || "",
+                relation: data.relation || "Friend",
+                avatar: uData.avatar || uData.profile_photo || "",
+                online: uData.online ?? true,
+                status: "Active",
+              });
+            }
+          }
+        }
+        setContacts(list);
+      } catch (err) {
+        console.error("[TrustNet Debug] Subscribing to contacts failed:", err);
+      }
+    });
 
-  // Custom User invite submission
-  const handleCustomSubmit = (e: React.FormEvent) => {
+    return () => unsubscribe();
+  }, [user]);
+
+  // 2. Lookup phone number or email in Firestore users collection
+  async function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!customName.trim() || !searchQuery.trim()) return;
+    const queryStr = searchQuery.trim().toLowerCase();
+    if (!queryStr) return;
 
-    // Generate an outgoing request
-    const newRequest: ContactRequest = {
-      id: crypto.randomUUID(),
-      name: customName.trim(),
-      phone: searchQuery.trim(),
-      relation: customRelation,
-      avatar:
-        "https://lh3.googleusercontent.com/aida-public/AB6AXuCWpKa7rM0MgxTGa8wnfmmRkJeuGrzTo8jtAmjh4fqS-GiR5uxyDguW4QfV0cpJwBalWWxWMi9c-g6ZEjsg_Vj1IxropD6jiDRVi_0LRMNdlWAM0CaWPXnQjNSAvaqLi06IE69BRgSRKjN4BCRb3LwMft0l0Qrdynv2dm5l12QmFntTea0P2AeCWygqodfIfwXzVOdcOJH_IkGyPJGnmwA5I_B7U7YJbi_DP3FxhUYWqpfKToHJefY-1b88Qdnd-m_r3Xy4yXbRyUBP", // Default/fallback avatar
-      online: false, // Custom invited contact is offline initially
-      type: "outgoing",
-      status: "Pending",
-      at: Date.now(),
-    };
+    setSearching(true);
+    setSearched(false);
+    setSearchResult(null);
+    setInviteSuccess(false);
+    setInviteError(null);
 
-    updateRequests([newRequest, ...requests]);
-    setCustomName("");
-    setShowCustomForm(false);
-  };
+    console.log(`[TrustNet Debug] Lookup user by query: "${queryStr}"`);
 
-  // Determine relationship status of a user relative to current contacts/requests
-  const getContactState = (phone: string) => {
-    const isContact = contacts.some((c) => c.phone === phone);
-    if (isContact) return { status: "Added" };
+    try {
+      const usersRef = collection(db, "users");
+      let snap;
 
-    const req = requests.find((r) => r.phone === phone);
-    if (req) {
-      return { status: req.status, type: req.type };
+      if (queryStr.includes("@")) {
+        // Query by email
+        const q1 = query(usersRef, where("email", "==", queryStr));
+        const q2 = query(usersRef, where("email_id", "==", queryStr));
+        const [res1, res2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+        snap = !res1.empty ? res1 : res2;
+      } else {
+        // Query by phone
+        const q = query(usersRef, where("phone_no", "==", queryStr));
+        snap = await getDocs(q);
+      }
+
+      if (snap.empty) {
+        console.log(`[TrustNet Debug] Lookup result: No registered user found matching query: "${queryStr}"`);
+        setSearchResult(null);
+      } else {
+        const foundDoc = snap.docs[0];
+        const fData = foundDoc.data();
+        console.log(`[TrustNet Debug] Lookup result: Found matching user! UID: "${foundDoc.id}", Name: "${fData.name || fData.displayName}"`);
+
+        // Check if there is already a relationship in trust_relationships
+        const relRef = collection(db, "trust_relationships");
+        const qRel1 = query(relRef, where("userA", "==", user!.id), where("userB", "==", foundDoc.id));
+        const qRel2 = query(relRef, where("userA", "==", foundDoc.id), where("userB", "==", user!.id));
+
+        const [snap1, snap2] = await Promise.all([getDocs(qRel1), getDocs(qRel2)]);
+        let relationshipStatus = "None";
+        let relationshipId = "";
+
+        if (!snap1.empty) {
+          relationshipStatus = snap1.docs[0].data().status;
+          relationshipId = snap1.docs[0].id;
+        } else if (!snap2.empty) {
+          relationshipStatus = snap2.docs[0].data().status;
+          relationshipId = snap2.docs[0].id;
+        }
+
+        setSearchResult({
+          id: foundDoc.id,
+          name: fData.name || fData.displayName || "User",
+          email: fData.email || fData.email_id || "",
+          phone: fData.phone_no || "",
+          avatar: fData.photoURL || fData.profile_photo || "",
+          relationshipStatus,
+          relationshipId,
+        });
+      }
+      setSearched(true);
+    } catch (err) {
+      console.error("[TrustNet Debug] Search failed:", err);
+      setInviteError("Failed to search. Please check your network connection.");
+    } finally {
+      setSearching(false);
     }
+  }
 
-    return { status: "None" };
-  };
+  // 3. Create real Firestore trust invitation
+  async function handleSendInvite() {
+    if (!user || !searchResult || sendingInvite) return;
 
-  // Filter mock directory by phone search query
-  const filteredUsers = searchQuery.trim()
-    ? MOCK_USER_DIRECTORY.filter((u) =>
-        u.phone.replace(/\D/g, "").includes(searchQuery.replace(/\D/g, "")),
-      )
-    : [];
+    setSendingInvite(true);
+    setInviteSuccess(false);
+    setInviteError(null);
+
+    console.log(`[TrustNet Debug] Creating invitation. SenderId: "${user.id}", ReceiverId: "${searchResult.id}", Status: "pending", Relation: "${customRelation}"`);
+
+    try {
+      const relRef = collection(db, "trust_relationships");
+      const docRef = await addDoc(relRef, {
+        userA: user.id,
+        userB: searchResult.id,
+        status: "pending",
+        relation: customRelation,
+        createdAt: serverTimestamp(),
+      });
+
+      console.log(`[TrustNet Debug] Invitation created successfully! DocID: "${docRef.id}"`);
+
+      // Write notification
+      try {
+        const notificationsRef = collection(db, "notifications");
+        await addDoc(notificationsRef, {
+          receiverUID: searchResult.id,
+          senderUID: user.id,
+          receiver: searchResult.id,
+          sender: user.id,
+          title: "Trust Circle Request",
+          message: `${user.name} sent you a trust request.`,
+          type: "trust_request",
+          createdAt: serverTimestamp(),
+          timestamp: serverTimestamp(),
+          read: false,
+          deepLink: "/circle",
+        });
+      } catch (notifErr) {
+        console.warn("[TrustNet Debug] Failed to write notification doc:", notifErr);
+      }
+
+      setInviteSuccess(true);
+      setSearchResult((prev: any) => ({
+        ...prev,
+        relationshipStatus: "pending",
+        relationshipId: docRef.id,
+      }));
+    } catch (err: any) {
+      console.error("[TrustNet Debug] Invitation creation failed:", err);
+      setInviteError("Failed to send invitation. Please try again.");
+    } finally {
+      setSendingInvite(false);
+    }
+  }
+
+  // 4. Cancel outgoing pending invite
+  async function handleCancelInvite(relationshipId: string) {
+    if (!relationshipId) return;
+    try {
+      await deleteDoc(doc(db, "trust_relationships", relationshipId));
+      setSearchResult((prev: any) => ({
+        ...prev,
+        relationshipStatus: "None",
+        relationshipId: "",
+      }));
+    } catch (err) {
+      console.error("[TrustNet Debug] Cancel invite failed:", err);
+    }
+  }
+
+  // 5. Remove contact from Firestore
+  async function removeContact(relationshipId: string) {
+    if (!relationshipId) return;
+    console.log(`[TrustNet Debug] Removing relationship ID: "${relationshipId}"`);
+    try {
+      await deleteDoc(doc(db, "trust_relationships", relationshipId));
+    } catch (err) {
+      console.error("[TrustNet Debug] Failed to delete contact:", err);
+    }
+  }
+
+  // Generate external invite links
+  const inviteText = encodeURIComponent(
+    `Hey! Please join my trust safety circle on TrustNet to keep each other safe in real-time. Register here: ${window.location.origin}/signup`
+  );
+  const whatsappUrl = `https://api.whatsapp.com/send?text=${inviteText}`;
+  const smsUrl = `sms:?&body=${inviteText}`;
 
   return (
     <div className="min-h-screen bg-[#faf9fc] pb-24 md:pb-8">
@@ -182,187 +265,141 @@ function AddContactPage() {
         <section className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
           <h2 className="text-base font-bold text-gray-900 mb-2">Search TrustNet Network</h2>
           <p className="text-xs text-gray-500 mb-4">
-            Enter a phone number to search for registered guardians and contacts.
+            Enter an email address or phone number to search for registered guardians and contacts.
           </p>
 
-          <div className="relative">
-            <input
-              type="tel"
-              placeholder="e.g. +1 (555) 123-4567"
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setShowCustomForm(false); // Hide custom form when query changes
-              }}
-              className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#0d631b]/30 focus:border-[#0d631b] transition"
-            />
-            <span className="material-symbols-outlined absolute left-3.5 top-3 text-gray-400 text-lg">
-              search
-            </span>
-          </div>
+          <form onSubmit={handleSearchSubmit} className="relative flex gap-2">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                required
+                placeholder="e.g. email@example.com or 9717785040"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setSearched(false);
+                }}
+                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#0d631b]/30 focus:border-[#0d631b] transition"
+              />
+              <span className="material-symbols-outlined absolute left-3.5 top-3 text-gray-400 text-lg">
+                search
+              </span>
+            </div>
+            <button
+              type="submit"
+              disabled={searching}
+              className="bg-[#0d631b] text-white font-semibold px-4 py-2.5 rounded-xl hover:bg-[#0a5215] active:scale-[0.98] transition disabled:opacity-60 text-sm"
+            >
+              {searching ? "Searching…" : "Search"}
+            </button>
+          </form>
 
           {/* Search Results */}
-          {searchQuery.trim() && (
-            <div className="mt-4 border-t border-gray-100 pt-4">
+          {searched && (
+            <div className="mt-5 border-t border-gray-150 pt-4">
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-                Search Results ({filteredUsers.length})
+                Search Results
               </h3>
 
-              {filteredUsers.length === 0 ? (
-                <div className="text-center py-4 bg-gray-50 rounded-xl border border-dashed border-gray-200">
-                  <p className="text-xs text-gray-500">
-                    No registered user found with that number.
+              {!searchResult ? (
+                <div className="text-center py-5 px-4 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                  <p className="text-xs text-gray-600 font-medium">
+                    No registered user found with this email address or phone number.
                   </p>
-                  {!showCustomForm ? (
-                    <button
-                      onClick={() => setShowCustomForm(true)}
-                      className="mt-2 text-xs font-bold text-[#0d631b] hover:underline"
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Send them an invitation link instead via:
+                  </p>
+                  <div className="flex gap-2 justify-center mt-3">
+                    <a
+                      href={whatsappUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 bg-[#25D366] text-white text-[11px] font-bold px-3 py-1.5 rounded-lg hover:opacity-90 transition shadow-sm"
                     >
-                      Invite "+ {searchQuery}" manually to Circle?
-                    </button>
-                  ) : (
-                    <form
-                      onSubmit={handleCustomSubmit}
-                      className="mt-4 px-4 text-left flex flex-col gap-3"
+                      <span className="material-symbols-outlined text-sm">share</span>
+                      WhatsApp
+                    </a>
+                    <a
+                      href={smsUrl}
+                      className="flex items-center gap-1.5 bg-gray-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg hover:bg-gray-800 transition shadow-sm"
                     >
-                      <hr className="border-gray-200 my-1" />
-                      <p className="text-[11px] font-semibold text-gray-700">
-                        Invite Out-of-Network Contact
+                      <span className="material-symbols-outlined text-sm">sms</span>
+                      SMS Link
+                    </a>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between p-3.5 bg-gray-55 border border-gray-150 rounded-xl transition">
+                  <div className="flex items-center gap-3">
+                    <UserAvatar
+                      name={searchResult.name}
+                      avatarUrl={searchResult.avatar}
+                      sizeClassName="w-10 h-10 text-xs font-semibold"
+                      className="border border-gray-200"
+                    />
+                    <div>
+                      <p className="font-semibold text-xs text-gray-900">
+                        {searchResult.name}
                       </p>
-                      <label className="text-xs text-gray-600 flex flex-col gap-1">
-                        Full Name
-                        <input
-                          required
-                          type="text"
-                          value={customName}
-                          onChange={(e) => setCustomName(e.target.value)}
-                          className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs"
-                          placeholder="Mom, Friend Name, etc."
-                        />
-                      </label>
-                      <label className="text-xs text-gray-600 flex flex-col gap-1">
-                        Relationship
+                      <p className="text-[10px] text-gray-500">{searchResult.phone}</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    {searchResult.relationshipStatus === "accepted" ? (
+                      <span className="text-[11px] font-bold text-[#0d631b] bg-[#0d631b]/10 px-3 py-1.5 rounded-full flex items-center gap-1">
+                        <span className="material-symbols-outlined text-sm">check</span>
+                        Added
+                      </span>
+                    ) : searchResult.relationshipStatus === "pending" ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full font-semibold border border-amber-100">
+                          Invite Sent
+                        </span>
+                        <button
+                          onClick={() => handleCancelInvite(searchResult.relationshipId)}
+                          className="text-[10px] font-bold text-red-600 hover:underline cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
                         <select
                           value={customRelation}
                           onChange={(e) => setCustomRelation(e.target.value)}
-                          className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white"
+                          className="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white focus:ring-1 focus:ring-[#0d631b]"
                         >
-                          {["Family", "Friend", "Partner", "Colleague", "Neighbor", "Other"].map(
+                          {["Friend", "Family", "Partner", "Colleague", "Neighbor", "Other"].map(
                             (r) => (
-                              <option key={r}>{r}</option>
-                            ),
+                              <option key={r} value={r}>
+                                {r}
+                              </option>
+                            )
                           )}
                         </select>
-                      </label>
-                      <button
-                        type="submit"
-                        className="bg-[#0d631b] hover:bg-[#0a5215] text-white text-xs font-bold py-2 rounded-lg transition"
-                      >
-                        Send Circle Invite
-                      </button>
-                    </form>
-                  )}
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2.5">
-                  {filteredUsers.map((u) => {
-                    const state = getContactState(u.phone);
-
-                    return (
-                      <div
-                        key={u.phone}
-                        className="flex items-center justify-between p-3 bg-gray-50/50 hover:bg-gray-50 border border-gray-100 rounded-xl transition"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="relative">
-                            <img
-                              alt={u.name}
-                              src={u.avatar}
-                              className="w-10 h-10 rounded-full object-cover border border-gray-200"
-                            />
-                            {/* Online/Offline status indicator */}
-                            <span
-                              className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-white ${
-                                u.online ? "bg-green-500" : "bg-gray-400"
-                              }`}
-                            />
-                          </div>
-                          <div>
-                            <p className="font-semibold text-xs text-gray-900 flex items-center gap-1.5">
-                              {u.name}
-                              <span className="text-[10px] text-gray-400 font-normal">
-                                ({u.relation})
-                              </span>
-                            </p>
-                            <p className="text-[10px] text-gray-500">{u.phone}</p>
-                          </div>
-                        </div>
-
-                        <div>
-                          {state.status === "Added" && (
-                            <span className="text-[11px] font-bold text-[#0d631b] bg-[#0d631b]/10 px-2.5 py-1 rounded-full flex items-center gap-1">
-                              <span className="material-symbols-outlined text-sm">check</span>
-                              Added
-                            </span>
-                          )}
-
-                          {state.status === "Pending" && state.type === "outgoing" && (
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full font-semibold">
-                                Pending
-                              </span>
-                              <button
-                                onClick={() => handleCancelRequest(u.phone)}
-                                className="text-[10px] font-bold text-red-600 hover:underline"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          )}
-
-                          {state.status === "Pending" && state.type === "incoming" && (
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                onClick={() => handleAcceptRequest(u.phone)}
-                                className="bg-[#0d631b] text-white text-[10px] font-bold px-2.5 py-1 rounded-full hover:bg-[#0a5215]"
-                              >
-                                Accept
-                              </button>
-                              <button
-                                onClick={() => handleRejectRequest(u.phone)}
-                                className="border border-red-200 text-red-600 text-[10px] font-bold px-2.5 py-1 rounded-full hover:bg-red-50"
-                              >
-                                Reject
-                              </button>
-                            </div>
-                          )}
-
-                          {state.status === "Rejected" && (
-                            <button
-                              onClick={() =>
-                                handleSendRequest(u.name, u.phone, u.relation, u.avatar, u.online)
-                              }
-                              className="bg-gray-800 text-white text-[10px] font-bold px-2.5 py-1 rounded-full hover:bg-gray-700"
-                            >
-                              Rejected (Retry)
-                            </button>
-                          )}
-
-                          {state.status === "None" && (
-                            <button
-                              onClick={() =>
-                                handleSendRequest(u.name, u.phone, u.relation, u.avatar, u.online)
-                              }
-                              className="bg-[#0d631b] text-white text-[10px] font-bold px-3 py-1.5 rounded-full hover:bg-[#0a5215] transition shadow-sm"
-                            >
-                              Send Invite
-                            </button>
-                          )}
-                        </div>
+                        <button
+                          onClick={handleSendInvite}
+                          disabled={sendingInvite}
+                          className="bg-[#0d631b] text-white text-[11px] font-bold px-3 py-1.5 rounded-lg hover:bg-[#0a5215] transition shadow-sm cursor-pointer"
+                        >
+                          {sendingInvite ? "Sending…" : "Send Invite"}
+                        </button>
                       </div>
-                    );
-                  })}
+                    )}
+                  </div>
                 </div>
+              )}
+
+              {inviteSuccess && (
+                <p className="text-[11px] text-emerald-600 font-semibold mt-2 text-center">
+                  Invitation sent successfully!
+                </p>
+              )}
+              {inviteError && (
+                <p className="text-[11px] text-red-600 font-medium mt-2 text-center">
+                  {inviteError}
+                </p>
               )}
             </div>
           )}
@@ -387,12 +424,12 @@ function AddContactPage() {
                 >
                   <div className="flex items-center gap-3">
                     <div className="relative">
-                      <img
-                        alt={c.name}
-                        src={c.avatar}
-                        className="w-10 h-10 rounded-full object-cover border border-gray-100"
+                      <UserAvatar
+                        name={c.name}
+                        avatarUrl={c.avatar}
+                        sizeClassName="w-10 h-10 text-xs font-semibold"
+                        className="border border-gray-150"
                       />
-                      {/* Visual indicator of online status */}
                       <span
                         className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-white ${
                           c.online ? "bg-green-500" : "bg-gray-400"
@@ -411,18 +448,12 @@ function AddContactPage() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                        c.status === "Active"
-                          ? "bg-green-50 text-[#0d631b]"
-                          : "bg-gray-100 text-gray-500"
-                      }`}
-                    >
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-50 text-[#0d631b]">
                       {c.status}
                     </span>
                     <button
-                      onClick={() => removeContact(c.id)}
-                      className="text-gray-400 hover:text-red-600 transition p-1 rounded-full hover:bg-gray-55"
+                      onClick={() => removeContact(c.relationshipId)}
+                      className="text-gray-400 hover:text-red-600 transition p-1 rounded-full hover:bg-gray-100 cursor-pointer"
                       aria-label="Remove Contact"
                     >
                       <span className="material-symbols-outlined text-sm">delete</span>

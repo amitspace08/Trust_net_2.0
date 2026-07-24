@@ -31,12 +31,48 @@ const greenBuildingIcon = {
   scale: 1.2,
 };
 
+const userPinIcon = {
+  path: "M 0,0 C -12,-12 -15,-20 -15,-25 C -15,-33 -8,-40 0,-40 C 8,-40 15,-33 15,-25 C 15,-20 12,-12 0,0 Z",
+  fillColor: "#10B981", // Green for current user
+  fillOpacity: 1.0,
+  strokeColor: "#FFFFFF",
+  strokeWeight: 1.5,
+  scale: 0.8,
+};
+
+const activeContactIcon = {
+  path: "M 0,0 C -12,-12 -15,-20 -15,-25 C -15,-33 -8,-40 0,-40 C 8,-40 15,-33 15,-25 C 15,-20 12,-12 0,0 Z",
+  fillColor: "#3B82F6", // Blue for active contact
+  fillOpacity: 1.0,
+  strokeColor: "#FFFFFF",
+  strokeWeight: 1.5,
+  scale: 0.8,
+};
+
+const staleContactIcon = {
+  path: "M 0,0 C -12,-12 -15,-20 -15,-25 C -15,-33 -8,-40 0,-40 C 8,-40 15,-33 15,-25 C 15,-20 12,-12 0,0 Z",
+  fillColor: "#9CA3AF", // Grey for stale contact
+  fillOpacity: 1.0,
+  strokeColor: "#FFFFFF",
+  strokeWeight: 1.5,
+  scale: 0.8,
+};
+
+const sosUserIcon = {
+  path: "M 0,0 C -12,-12 -15,-20 -15,-25 C -15,-33 -8,-40 0,-40 C 8,-40 15,-33 15,-25 C 15,-20 12,-12 0,0 Z",
+  fillColor: "#EF4444", // Red for SOS user
+  fillOpacity: 1.0,
+  strokeColor: "#FFFFFF",
+  strokeWeight: 1.5,
+  scale: 0.8,
+};
+
 export default function Map() {
   const { user } = useAuth();
   const lastLocationWrite = useRef(0);
   const [center, setCenter] = useState({
-    lat: 28.6139,
-    lng: 77.209,
+    lat: 28.653,
+    lng: 77.156,
   });
 
   const [users, setUsers] = useState<any[]>([]);
@@ -65,6 +101,14 @@ export default function Map() {
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: "AIzaSyAyqOvmQjDAp7Mwi5CYUUiSNrjqd5kyuEk",
   });
+
+  const [googlePoint, setGooglePoint] = useState<any>(null);
+
+  useEffect(() => {
+    if (isLoaded && (window as any).google) {
+      setGooglePoint(new (window as any).google.maps.Point(0, 5));
+    }
+  }, [isLoaded]);
 
   // Live location tracking
   useEffect(() => {
@@ -111,8 +155,13 @@ export default function Map() {
     };
 
     const handleVisibilityChange = () => {
-      if (watchId) navigator.geolocation.clearWatch(watchId);
-      if (isActive) startTracking();
+      if (watchId) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = 0;
+      }
+      if (document.visibilityState === "visible") {
+        if (isActive) startTracking();
+      }
     };
 
     startTracking();
@@ -265,8 +314,12 @@ export default function Map() {
         {/* Current user marker */}
         <Marker
           position={center}
-          label={{ text: "You", color: "#ffffff", fontWeight: "700" }}
-          icon={{ url: "https://maps.google.com/mapfiles/ms/icons/green-dot.png" }}
+          label={{ text: "You", color: "#065f46", fontWeight: "700" }}
+          icon={
+            googlePoint
+              ? { ...userPinIcon, labelOrigin: googlePoint }
+              : userPinIcon
+          }
         />
         {/* Normal User Markers */}
         {users
@@ -281,6 +334,7 @@ export default function Map() {
           .map((u) => {
             const lastActive = u.timestamp?.toDate ? u.timestamp.toDate().getTime() : (u.timestamp?.seconds ? u.timestamp.seconds * 1000 : Date.now());
             const isStale = Date.now() - lastActive > 3_600_000;
+            const baseIcon = isStale ? staleContactIcon : activeContactIcon;
             return (
               <Marker
                 key={u.id}
@@ -290,14 +344,14 @@ export default function Map() {
                 }}
                 label={{
                   text: u.name || "Contact",
-                  color: isStale ? "#6b7280" : "#1e3a8a",
-                  fontWeight: "600",
+                  color: isStale ? "#4b5563" : "#1d4ed8",
+                  fontWeight: "700",
                 }}
-                icon={{
-                  url: isStale
-                    ? "https://maps.google.com/mapfiles/ms/icons/grey-dot.png"
-                    : "https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
-                }}
+                icon={
+                  googlePoint
+                    ? { ...baseIcon, labelOrigin: googlePoint }
+                    : baseIcon
+                }
               />
             );
           })}
@@ -312,9 +366,16 @@ export default function Map() {
                 lat: user.latitude,
                 lng: user.longitude,
               }}
-              icon={{
-                url: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
+              label={{
+                text: "SOS!",
+                color: "#991b1b",
+                fontWeight: "800",
               }}
+              icon={
+                googlePoint
+                  ? { ...sosUserIcon, labelOrigin: googlePoint }
+                  : sosUserIcon
+              }
             />
           ))}
 

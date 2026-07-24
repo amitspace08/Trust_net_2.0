@@ -1,115 +1,106 @@
-import { RecaptchaVerifier, signInWithPhoneNumber, signOut } from "firebase/auth";
+import { createUser } from "./userService";
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile,
+  onAuthStateChanged,
+  type User,
+} from "firebase/auth";
 
-import type { ConfirmationResult, User } from "firebase/auth";
-
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore";
 
 import { auth, db } from "../firebase/firebase";
 
-// Stores OTP confirmation session
-let confirmationResult: ConfirmationResult | null = null;
-
 // ======================================
-// Initialize Invisible reCAPTCHA
+// Sign Up
 // ======================================
 
-export const initializeRecaptcha = (containerId: string) => {
-  return new RecaptchaVerifier(auth, containerId, {
-    size: "invisible",
-    callback: () => {
-      console.log("reCAPTCHA verified");
-    },
-  });
-};
-
-// ======================================
-// Send OTP
-// ======================================
-
-export const sendOTP = async (phoneNumber: string, appVerifier: RecaptchaVerifier) => {
+export const signup = async (
+  name: string,
+  email: string,
+  password: string
+) => {
   try {
-    confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
+    const credential = await createUserWithEmailAndPassword(
+      auth,
+      email,
+      password
+    );
 
-    return {
-      success: true,
-      message: "OTP sent successfully",
-    };
-  } catch (error: any) {
-    console.error(error);
-
-    return {
-      success: false,
-      message: error.message,
-    };
-  }
-};
-
-// ======================================
-// Verify OTP
-// ======================================
-
-export const verifyOTP = async (otp: string) => {
-  try {
-    if (!confirmationResult) {
-      throw new Error("OTP has not been sent.");
-    }
-
-    const result = await confirmationResult.confirm(otp);
-
-    await saveUser(result.user);
-
-    return {
-      success: true,
-      user: result.user,
-    };
-  } catch (error: any) {
-    console.error(error);
-
-    return {
-      success: false,
-      message: error.message,
-    };
-  }
-};
-
-// ======================================
-// Save User in Firestore
-// ======================================
-
-export const saveUser = async (user: User) => {
-  try {
-    const userRef = doc(db, "users", user.uid);
-
-    const userSnap = await getDoc(userRef);
-
-    if (userSnap.exists()) {
-      return;
-    }
-
-    await setDoc(userRef, {
-      uid: user.uid,
-      displayName: user.displayName || "",
-      email_id: user.email || "",
-      phone_no: user.phoneNumber || "",
-      profile_photo: user.photoURL || "",
-      verification_status: true,
-      online: true,
-      createdAt: serverTimestamp(),
+    await updateProfile(credential.user, {
+      displayName: name,
     });
 
-    console.log("User profile created.");
+    await createUser(credential.user.uid, {
+      displayName: credential.user.displayName || name || "",
+      email: credential.user.email || email || "",
+      photoURL: credential.user.photoURL || "",
+    });
+
+    return {
+      success: true,
+      user: credential.user,
+    };
   } catch (error: any) {
     console.error(error);
-    throw error;
+
+    return {
+      success: false,
+      message: error.message,
+    };
   }
 };
 
 // ======================================
-// Get Current User
+// Login
 // ======================================
 
-export const getCurrentUser = (): User | null => {
-  return auth.currentUser;
+export const login = async (
+  email: string,
+  password: string
+) => {
+  try {
+    const credential = await signInWithEmailAndPassword(
+      auth,
+      email,
+      password
+    );
+
+    return {
+      success: true,
+      user: credential.user,
+    };
+  } catch (error: any) {
+    console.error(error);
+
+    return {
+      success: false,
+      message: error.message,
+    };
+  }
+};
+
+
+// ======================================
+// Current User
+// ======================================
+
+export const getCurrentUser = () => auth.currentUser;
+
+// ======================================
+// Auth State Listener
+// ======================================
+
+export const authListener = (
+  callback: (user: User | null) => void
+) => {
+  return onAuthStateChanged(auth, callback);
 };
 
 // ======================================
@@ -117,18 +108,5 @@ export const getCurrentUser = (): User | null => {
 // ======================================
 
 export const logout = async () => {
-  try {
-    await signOut(auth);
-
-    return {
-      success: true,
-    };
-  } catch (error: any) {
-    console.error(error);
-
-    return {
-      success: false,
-      message: error.message,
-    };
-  }
+  await signOut(auth);
 };

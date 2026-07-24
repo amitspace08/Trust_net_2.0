@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { getFirestore, doc, setDoc, serverTimestamp, GeoPoint } from "firebase/firestore";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBc9ngpaHNcMJy7A8ajNIvbYtEPyt9YhfI",
@@ -12,52 +13,92 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
 
 const MOCK_USERS = [
-  { uid: "mock_user_1", displayName: "Aarav Mehta", email: "aarav@trustnet.com", phone: "+919876543210" },
-  { uid: "mock_user_2", displayName: "Diya Patel", email: "diya@trustnet.com", phone: "+919876543211" },
-  { uid: "mock_user_3", displayName: "Kabir Singh", email: "kabir@trustnet.com", phone: "+919876543212" },
-  { uid: "mock_user_4", displayName: "Isha Sharma", email: "isha@trustnet.com", phone: "+919876543213" },
-  { uid: "mock_user_5", displayName: "Reyansh Gupta", email: "reyansh@trustnet.com", phone: "+919876543214" }
+  { name: "Aarav Mehta", email: "aarav@trustnet.com", phone: "+919876543210" },
+  { name: "Diya Patel", email: "diya@trustnet.com", phone: "+919876543211" },
+  { name: "Kabir Singh", email: "kabir@trustnet.com", phone: "+919876543212" },
+  { name: "Isha Sharma", email: "isha@trustnet.com", phone: "+919876543213" },
+  { name: "Reyansh Gupta", email: "reyansh@trustnet.com", phone: "+919876543214" }
 ];
 
 async function seed() {
   console.log("Seeding 5 mock client accounts...");
+  const uids = {};
+
   for (const user of MOCK_USERS) {
-    const userRef = doc(db, "users", user.uid);
+    let uid = "";
+    try {
+      // Try to create user
+      const userCredential = await createUserWithEmailAndPassword(auth, user.email, "Password123!");
+      uid = userCredential.user.uid;
+      console.log(`Created new auth account for: ${user.name} (UID: ${uid})`);
+    } catch (err) {
+      if (err.code === "auth/email-already-in-use") {
+        // If already exists, sign in to get UID
+        const userCredential = await signInWithEmailAndPassword(auth, user.email, "Password123!");
+        uid = userCredential.user.uid;
+        console.log(`Auth account already exists, signed in: ${user.name} (UID: ${uid})`);
+      } else {
+        throw err;
+      }
+    }
+    
+    uids[user.email] = uid;
+
+    // Write user profile document (must be authenticated as this user to write users/{uid})
+    const userRef = doc(db, "users", uid);
     await setDoc(userRef, {
-      uid: user.uid,
-      displayName: user.displayName,
+      uid: uid,
+      displayName: user.name,
+      name: user.name,
       email_id: user.email,
       phone_no: user.phone,
-      profile_photo: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.displayName}`,
+      phone: user.phone,
+      profile_photo: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.name}`,
+      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.name}`,
       verification_status: true,
       online: true,
       createdAt: serverTimestamp(),
-    });
-    
-    // Seed initial locations
-    const locRef = doc(db, "user_locations", user.uid);
+    }, { merge: true });
+
+    // Seed initial location (must be authenticated as this user to write user_locations/{uid})
+    const locRef = doc(db, "user_locations", uid);
+    const lat = 28.6139 + (Math.random() - 0.5) * 0.01;
+    const lng = 77.209 + (Math.random() - 0.5) * 0.01;
     await setDoc(locRef, {
-      uid: user.uid,
-      latitude: 28.6139 + (Math.random() - 0.5) * 0.01,
-      longitude: 77.209 + (Math.random() - 0.5) * 0.01,
+      uid: uid,
+      geopoint: new GeoPoint(lat, lng),
+      latitude: lat,
+      longitude: lng,
       sharingEnabled: true,
       timestamp: serverTimestamp(),
-    });
+    }, { merge: true });
+
+    // Sign out to clear context before next iteration
+    await signOut(auth);
   }
-  
-  console.log("Creating relationships...");
-  // Aarav (mock_user_1) is friends with Diya, Kabir, and Isha
-  const rels = [
-    { id: "rel_1_2", userA: "mock_user_1", userB: "mock_user_2", status: "accepted", relation: "Family" },
-    { id: "rel_1_3", userA: "mock_user_1", userB: "mock_user_3", status: "accepted", relation: "Friend" },
-    { id: "rel_1_4", userA: "mock_user_1", userB: "mock_user_4", status: "accepted", relation: "Friend" },
-    { id: "rel_2_3", userA: "mock_user_2", userB: "mock_user_3", status: "accepted", relation: "Friend" },
-    { id: "rel_2_5", userA: "mock_user_2", userB: "mock_user_5", status: "pending", relation: "Family" }
+
+  console.log("Establishing trust relationships...");
+
+  const aaravEmail = "aarav@trustnet.com";
+  const diyaEmail = "diya@trustnet.com";
+  const kabirEmail = "kabir@trustnet.com";
+  const ishaEmail = "isha@trustnet.com";
+  const reyanshEmail = "reyansh@trustnet.com";
+
+  // Sign in as Aarav to establish relationships from Aarav
+  console.log("Signing in as Aarav to request relationships...");
+  await signInWithEmailAndPassword(auth, aaravEmail, "Password123!");
+
+  const aaravRels = [
+    { id: `rel_${uids[aaravEmail]}_${uids[diyaEmail]}`, userA: uids[aaravEmail], userB: uids[diyaEmail], status: "accepted", relation: "Family" },
+    { id: `rel_${uids[aaravEmail]}_${uids[kabirEmail]}`, userA: uids[aaravEmail], userB: uids[kabirEmail], status: "accepted", relation: "Friend" },
+    { id: `rel_${uids[aaravEmail]}_${uids[ishaEmail]}`, userA: uids[aaravEmail], userB: uids[ishaEmail], status: "accepted", relation: "Friend" }
   ];
 
-  for (const rel of rels) {
+  for (const rel of aaravRels) {
     const relRef = doc(db, "trust_relationships", rel.id);
     await setDoc(relRef, {
       userA: rel.userA,
@@ -65,8 +106,30 @@ async function seed() {
       status: rel.status,
       relation: rel.relation,
       createdAt: serverTimestamp(),
-    });
+    }, { merge: true });
   }
+  await signOut(auth);
+
+  // Sign in as Diya to establish relationships from Diya
+  console.log("Signing in as Diya to request relationships...");
+  await signInWithEmailAndPassword(auth, diyaEmail, "Password123!");
+
+  const diyaRels = [
+    { id: `rel_${uids[diyaEmail]}_${uids[kabirEmail]}`, userA: uids[diyaEmail], userB: uids[kabirEmail], status: "accepted", relation: "Friend" },
+    { id: `rel_${uids[diyaEmail]}_${uids[reyanshEmail]}`, userA: uids[diyaEmail], userB: uids[reyanshEmail], status: "pending", relation: "Family" }
+  ];
+
+  for (const rel of diyaRels) {
+    const relRef = doc(db, "trust_relationships", rel.id);
+    await setDoc(relRef, {
+      userA: rel.userA,
+      userB: rel.userB,
+      status: rel.status,
+      relation: rel.relation,
+      createdAt: serverTimestamp(),
+    }, { merge: true });
+  }
+  await signOut(auth);
 
   console.log("Seeding complete successfully!");
 }

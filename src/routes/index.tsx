@@ -1,6 +1,8 @@
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../lib/auth";
+import { db } from "../firebase/firebase";
+import { UserAvatar } from "../components/ui/UserAvatar";
 import Map from "../components/ui/Map";
 
 export const Route = createFileRoute("/")({
@@ -12,6 +14,7 @@ export const Route = createFileRoute("/")({
 
 function HomePage() {
   const { user } = useAuth();
+  const avatarUrl = user?.avatar || user?.profile_photo || "";
   const router = useRouter();
 
   // Long-press hold state
@@ -67,10 +70,11 @@ function HomePage() {
       {/* NavigationDrawer (Web Only) */}
       <nav className="hidden md:flex flex-col bg-white text-gray-800 h-full rounded-r-2xl shadow-sm border-r border-gray-150 w-72 max-w-[80vw] p-5 fixed left-0 top-0 z-50">
         <div className="flex items-center gap-4 mb-8 pt-4">
-          <img
-            alt="User Profile"
-            className="w-12 h-12 rounded-full object-cover border border-gray-100"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuCWpKa7rM0MgxTGa8wnfmmRkJeuGrzTo8jtAmjh4fqS-GiR5uxyDguW4QfV0cpJwBalWWxWMi9c-g6ZEjsg_Vj1IxropD6jiDRVi_0LRMNdlWAM0CaWPXnQjNSAvaqLi06IE69BRgSRKjN4BCRb3LwMft0l0Qrdynv2dm5l12QmFntTea0P2AeCWygqodfIfwXzVOdcOJH_IkGyPJGnmwA5I_B7U7YJbi_DP3FxhUYWqpfKToHJefY-1b88Qdnd-m_r3Xy4yXbRyUBP"
+          <UserAvatar
+            name={user?.name || "User"}
+            avatarUrl={avatarUrl}
+            sizeClassName="w-12 h-12 text-base font-semibold"
+            className="border border-gray-100"
           />
           <div>
             <h2 className="text-sm font-bold text-gray-900">{user?.name || "Priya Sharma"}</h2>
@@ -203,10 +207,11 @@ function HomePage() {
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">Ready to stay safe tonight?</p>
           </div>
-          <img
-            alt="Profile Avatar"
-            className="w-12 h-12 rounded-full object-cover border border-gray-100 shadow-sm md:hidden"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuCWpKa7rM0MgxTGa8wnfmmRkJeuGrzTo8jtAmjh4fqS-GiR5uxyDguW4QfV0cpJwBalWWxWMi9c-g6ZEjsg_Vj1IxropD6jiDRVi_0LRMNdlWAM0CaWPXnQjNSAvaqLi06IE69BRgSRKjN4BCRb3LwMft0l0Qrdynv2dm5l12QmFntTea0P2AeCWygqodfIfwXzVOdcOJH_IkGyPJGnmwA5I_B7U7YJbi_DP3FxhUYWqpfKToHJefY-1b88Qdnd-m_r3Xy4yXbRyUBP"
+          <UserAvatar
+            name={user?.name || "User"}
+            avatarUrl={avatarUrl}
+            sizeClassName="w-12 h-12 text-base font-semibold"
+            className="border border-gray-100 shadow-sm md:hidden"
           />
         </div>
 

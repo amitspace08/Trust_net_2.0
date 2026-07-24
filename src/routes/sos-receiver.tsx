@@ -8,6 +8,8 @@ import {
   listenSOS,
 } from "../services/sosService";
 import { subscribeToLiveSOSLocation, updateMyLocation } from "../services/locationService";
+import { useAuth } from "../lib/auth";
+import { UserAvatar } from "../components/ui/UserAvatar";
 
 type ReceiverSearch = {
   role?: string;
@@ -28,6 +30,12 @@ export const Route = createFileRoute("/sos-receiver")({
 });
 
 function SosReceiverPage() {
+  const { user } = useAuth();
+  const userAvatarUrl = user?.avatar || user?.profile_photo || "";
+  const userName = user?.name || "User";
+
+  const [distressedUser, setDistressedUser] = useState<any>(null);
+
   const router = useRouter();
   const search = useSearch({ from: "/sos-receiver" });
   const sessionId = search.sessionId;
@@ -107,9 +115,22 @@ function SosReceiverPage() {
   // from a session-scoped notification.
   useEffect(() => {
     if (!sessionId) return;
-    return listenSOS(sessionId, (session) => {
+    return listenSOS(sessionId, async (session) => {
       if (session.status !== "active") setSosStatus("ended");
       if (session.layerActive) setSosLayer(session.layerActive);
+      
+      if (session.triggeredBy) {
+        try {
+          const { getFirestore, doc, getDoc } = await import("firebase/firestore");
+          const db = getFirestore();
+          const userSnap = await getDoc(doc(db, "users", session.triggeredBy));
+          if (userSnap.exists()) {
+            setDistressedUser(userSnap.data());
+          }
+        } catch (err) {
+          console.error("Error loading distressed user profile:", err);
+        }
+      }
     });
   }, [sessionId]);
 
@@ -424,13 +445,14 @@ function SosReceiverPage() {
       {/* NavigationDrawer (Web Only) */}
       <nav className="hidden md:flex flex-col bg-white text-gray-800 h-full rounded-r-2xl shadow-sm border-r border-gray-150 w-72 max-w-[80vw] p-5 fixed left-0 top-0 z-50">
         <div className="flex items-center gap-4 mb-8 pt-4">
-          <img
-            alt="User Profile"
-            className="w-12 h-12 rounded-full object-cover border border-gray-100"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuCWpKa7rM0MgxTGa8wnfmmRkJeuGrzTo8jtAmjh4fqS-GiR5uxyDguW4QfV0cpJwBalWWxWMi9c-g6ZEjsg_Vj1IxropD6jiDRVi_0LRMNdlWAM0CaWPXnQjNSAvaqLi06IE69BRgSRKjN4BCRb3LwMft0l0Qrdynv2dm5l12QmFntTea0P2AeCWygqodfIfwXzVOdcOJH_IkGyPJGnmwA5I_B7U7YJbi_DP3FxhUYWqpfKToHJefY-1b88Qdnd-m_r3Xy4yXbRyUBP"
+          <UserAvatar
+            name={userName}
+            avatarUrl={userAvatarUrl}
+            sizeClassName="w-12 h-12 text-base font-semibold"
+            className="border border-gray-100"
           />
           <div>
-            <h2 className="text-sm font-bold text-gray-900">Priya Sharma</h2>
+            <h2 className="text-sm font-bold text-gray-900">{userName}</h2>
             <p className="text-xs text-gray-500">Trust Score: 98</p>
             <p
               className={`text-xs font-semibold mt-0.5 ${isLayer2 ? "text-indigo-600" : "text-red-600"}`}
@@ -522,7 +544,7 @@ function SosReceiverPage() {
                   ? `Someone nearby needs urgent help (approximately 400m from you)`
                   : isLayer2
                     ? `A friend of ${mutualContactName} needs help nearby (approximately 300m from you)`
-                    : "Priya Sharma has triggered an SOS alert!"}
+                    : `${distressedUser?.name || distressedUser?.displayName || "Someone"} has triggered an SOS alert!`}
               </p>
             </div>
           </div>
@@ -549,13 +571,11 @@ function SosReceiverPage() {
                 isLayer3 ? "border-amber-400" : "border-indigo-400"
               }`}
             >
-              <div className="relative w-full h-full rounded-full overflow-hidden p-0.5">
-                <img
-                  alt="Priya Sharma"
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuDevHM859wbGxE1v3bjGeHm9QWzqXVEu1HVSEmBx2_-6DJRnLenf3hfP69zFX6cte_YU-hRUie6BVS5exm7Pg4n-UQBVvi1CauceVEzf22expdXYW8mqW5REfMBoJFU8WOqZPKGVjLWDYrUS0R3pIwcPygxHj9pSgSUMBGB-6ahFiXHn3LIFkapfPw4KxRgIiYdB_QQLO4hAFryndltNDNOPJL54QzcNQjzGCJicOeeXAC1D_I34mAsicy2i2dnWE2wvsopYCefXkeA"
-                  className="w-full h-full rounded-full object-cover"
-                />
-              </div>
+              <UserAvatar
+                name={distressedUser?.name || distressedUser?.displayName || "Someone"}
+                avatarUrl={distressedUser?.avatar || distressedUser?.profile_photo}
+                sizeClassName="w-full h-full text-xs font-semibold"
+              />
             </div>
           </>
         ) : (
@@ -566,13 +586,11 @@ function SosReceiverPage() {
               isLayer3 ? "border-amber-500" : "border-red-500"
             }`}
           >
-            <div className="relative w-full h-full rounded-full overflow-hidden p-0.5 animate-pulse">
-              <img
-                alt="Priya Sharma"
-                src="https://lh3.googleusercontent.com/aida-public/AB6AXuDevHM859wbGxE1v3bjGeHm9QWzqXVEu1HVSEmBx2_-6DJRnLenf3hfP69zFX6cte_YU-hRUie6BVS5exm7Pg4n-UQBVvi1CauceVEzf22expdXYW8mqW5REfMBoJFU8WOqZPKGVjLWDYrUS0R3pIwcPygxHj9pSgSUMBGB-6ahFiXHn3LIFkapfPw4KxRgIiYdB_QQLO4hAFryndltNDNOPJL54QzcNQjzGCJicOeeXAC1D_I34mAsicy2i2dnWE2wvsopYCefXkeA"
-                className="w-full h-full rounded-full object-cover"
-              />
-            </div>
+            <UserAvatar
+              name={distressedUser?.name || distressedUser?.displayName || "Someone"}
+              avatarUrl={distressedUser?.avatar || distressedUser?.profile_photo}
+              sizeClassName="w-full h-full text-xs font-semibold animate-pulse"
+            />
             <span
               className={`absolute inset-0 rounded-full border-4 animate-ping opacity-35 ${
                 isLayer3 ? "border-amber-600" : "border-red-600"

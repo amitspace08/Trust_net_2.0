@@ -1,80 +1,158 @@
-import { doc, updateDoc, serverTimestamp, getDoc } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  updateDoc,
+  setDoc,
+  serverTimestamp,
+} from "firebase/firestore";
 
 import { db } from "../firebase/firebase";
 
-// =======================================
-// Register as Guardian Angel
-// =======================================
+// ======================================
+// Get User Profile
+// ======================================
 
-export async function registerAsGuardianAngel(uid: string) {
+export async function getUser(uid: string) {
   try {
-    await updateDoc(doc(db, "users", uid), {
-      isGuardianAngel: true,
-      guardianVerified: true,
+    const ref = doc(db, "users", uid);
+
+    const snap = await getDoc(ref);
+
+    if (!snap.exists()) {
+      return null;
+    }
+
+    return {
+      id: snap.id,
+      ...(snap.data() as any),
+    };
+  } catch (err) {
+    console.error(err);
+    throw err;
+  }
+}
+
+// ======================================
+// Create User Profile
+// ======================================
+
+export async function createUser(
+  uid: string,
+  data: {
+    displayName: string;
+    email: string;
+    phone?: string;
+    photoURL?: string;
+  }
+) {
+  try {
+    await setDoc(doc(db, "users", uid), {
+      uid,
+      displayName: data.displayName,
+      email_id: data.email,
+      phone_no: data.phone || "",
+      profile_photo: data.photoURL || "",
+
+      trustScore: 100,
+      verification_status: true,
+
+      isGuardianAngel: false,
+      guardianAvailable: false,
+      guardianVerified: false,
       guardianRating: 0,
       guardianResponseCount: 0,
-      guardianAvailable: true,
-      guardianRegisteredAt: serverTimestamp(),
+
+      sharingLocation: true,
+
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
   } catch (err) {
     console.error(err);
-
     throw err;
   }
 }
 
-// =======================================
-// Set Availability
-// =======================================
+// ======================================
+// Update Profile
+// ======================================
 
-export async function setGuardianAvailability(uid: string, available: boolean) {
+export async function updateUser(
+  uid: string,
+  updates: Record<string, unknown>
+) {
   try {
     await updateDoc(doc(db, "users", uid), {
-      guardianAvailable: available,
+      ...updates,
+      updatedAt: serverTimestamp(),
     });
   } catch (err) {
     console.error(err);
-
     throw err;
   }
 }
 
-// =======================================
-// Get Guardian Profile
-// =======================================
+// ======================================
+// Update Display Name
+// ======================================
 
-export async function getGuardianProfile(uid: string) {
-  const snap = await getDoc(doc(db, "users", uid));
-
-  if (!snap.exists()) return null;
-
-  return {
-    id: snap.id,
-    ...(snap.data() as any),
-  };
+export async function updateDisplayName(
+  uid: string,
+  displayName: string
+) {
+  await updateUser(uid, {
+    displayName,
+  });
 }
 
 // ======================================
-// Update Guardian Rating
+// Update Phone Number
 // ======================================
 
-export async function updateGuardianRating(guardianUID: string, rating: number) {
-  const ref = doc(db, "users", guardianUID);
+export async function updatePhoneNumber(
+  uid: string,
+  phone: string
+) {
+  await updateUser(uid, {
+    phone_no: phone,
+  });
+}
 
-  const snap = await getDoc(ref);
+// ======================================
+// Update Profile Photo
+// ======================================
 
-  if (!snap.exists()) return;
+export async function updateProfilePhoto(
+  uid: string,
+  photoURL: string
+) {
+  await updateUser(uid, {
+    profile_photo: photoURL,
+  });
+}
 
-  const data = snap.data();
+// ======================================
+// Toggle Location Sharing
+// ======================================
 
-  const oldRating = data.guardianRating || 0;
+export async function updateLocationSharing(
+  uid: string,
+  enabled: boolean
+) {
+  await updateUser(uid, {
+    sharingLocation: enabled,
+  });
+}
 
-  const count = data.guardianResponseCount || 0;
+// ======================================
+// Update Trust Score
+// ======================================
 
-  const newRating = (oldRating * count + rating) / (count + 1);
-
-  await updateDoc(ref, {
-    guardianRating: newRating,
-    guardianResponseCount: count + 1,
+export async function updateTrustScore(
+  uid: string,
+  score: number
+) {
+  await updateUser(uid, {
+    trustScore: score,
   });
 }
