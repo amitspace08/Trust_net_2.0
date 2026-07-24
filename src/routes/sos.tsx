@@ -1076,14 +1076,16 @@ function SosEmergencyPage() {
         {/* Task 2 S4.2 & S1.4: Persistent Nearest Safe Space Banner / layer3Exhausted Banner */}
         {nearestSpace && (
           <div
-            className={`border rounded-2xl p-4 flex gap-3 items-center shadow-sm transition-all duration-500 ${
+            className={`border rounded-2xl p-5 flex gap-4 items-center shadow-lg transition-all duration-500 ${
               layer3Exhausted
-                ? "bg-emerald-600 border-emerald-500 text-white ring-4 ring-emerald-500/20"
+                ? "bg-emerald-600 border-emerald-500 text-white ring-8 ring-emerald-500/20 scale-[1.02] py-6 animate-pulse"
                 : "bg-emerald-50 border-emerald-200 text-emerald-800"
             }`}
           >
             <span
-              className="material-symbols-outlined text-2xl shrink-0"
+              className={`material-symbols-outlined shrink-0 transition-all ${
+                layer3Exhausted ? "text-4xl text-white animate-bounce" : "text-2xl"
+              }`}
               style={{ fontVariationSettings: "'FILL' 1" }}
             >
               {nearestSpace.type === "police_station"
@@ -1094,17 +1096,21 @@ function SosEmergencyPage() {
             </span>
             <div className="flex-1 min-w-0">
               <h4
-                className={`font-black text-xs leading-none ${layer3Exhausted ? "text-white" : "text-emerald-900"}`}
+                className={`font-black tracking-tight leading-snug ${
+                  layer3Exhausted ? "text-sm text-white font-extrabold" : "text-xs text-emerald-900"
+                }`}
               >
                 {layer3Exhausted
                   ? "⚠️ SOS Alert Exhausted — Head to Safe Space"
                   : "Nearest verified Safe Space"}
               </h4>
               <p
-                className={`text-[10px] mt-1.5 leading-relaxed font-semibold ${layer3Exhausted ? "text-emerald-50" : "text-emerald-700"}`}
+                className={`mt-1.5 leading-relaxed font-semibold transition-all ${
+                  layer3Exhausted ? "text-xs text-emerald-50 font-bold" : "text-[10px] text-emerald-700"
+                }`}
               >
                 {layer3Exhausted
-                  ? `Walk to ${nearestSpace.name} now. Help is registered there. (${nearestSpace.distance}m away)`
+                  ? `Walk to the nearest safe space now. Help is registered there. (${nearestSpace.name} is ${nearestSpace.distance}m away)`
                   : `${nearestSpace.name} is ${nearestSpace.distance}m from your location.`}
               </p>
             </div>
@@ -1112,9 +1118,9 @@ function SosEmergencyPage() {
               href={`https://www.google.com/maps/dir/?api=1&destination=${nearestSpace.latitude},${nearestSpace.longitude}&travelmode=walking`}
               target="_blank"
               rel="noopener noreferrer"
-              className={`px-3.5 py-2.5 font-extrabold text-[10px] uppercase rounded-xl transition shadow active:scale-[0.98] shrink-0 ${
+              className={`px-4 py-3 font-extrabold text-xs uppercase rounded-xl transition shadow active:scale-[0.98] shrink-0 ${
                 layer3Exhausted
-                  ? "bg-white text-emerald-800 hover:bg-emerald-50"
+                  ? "bg-white text-emerald-800 hover:bg-emerald-50 scale-105"
                   : "bg-emerald-600 text-white hover:bg-emerald-700"
               }`}
             >
