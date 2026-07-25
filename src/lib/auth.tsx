@@ -27,7 +27,7 @@ type AuthState = {
   user: User | null;
   ready: boolean;
   login: (email: string, password: string) => Promise<void>;
-  signup: (name: string, email: string, password: string) => Promise<void>;
+  signup: (name: string, email: string, password: string, avatarUrl?: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -175,7 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw firebaseErr;
       }
     },
-    async signup(name, email, password) {
+    async signup(name, email, password, avatarUrl) {
       const emailNormalized = email.trim().toLowerCase();
       if (!name.trim()) {
         throw new Error("Name cannot be empty");
@@ -191,8 +191,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const userCredential = await createUserWithEmailAndPassword(auth, emailNormalized, password);
         const firebaseUser = userCredential.user;
 
-        // 2. Wait until Auth succeeds & update display name
-        await updateProfile(firebaseUser, { displayName: name.trim() });
+        // 2. Wait until Auth succeeds & update display name + photoURL
+        const resolvedAvatar = avatarUrl?.trim() ||
+          `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(name.trim())}`;
+        await updateProfile(firebaseUser, { displayName: name.trim(), photoURL: resolvedAvatar });
 
         // 3. Create Firestore user document with required schema
         const { getFirestore, doc, setDoc, serverTimestamp } = await import("firebase/firestore");
@@ -203,8 +205,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           displayName: name.trim(),
           email: emailNormalized,
           email_id: emailNormalized,
-          photoURL: "",
-          profile_photo: "",
+          photoURL: resolvedAvatar,
+          profile_photo: resolvedAvatar,
           createdAt: serverTimestamp(),
           profileCompleted: true,
           status: "active",
@@ -218,8 +220,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           id: firebaseUser.uid,
           name: name.trim(),
           email: emailNormalized,
-          avatar: "",
-          profile_photo: "",
+          avatar: resolvedAvatar,
+          profile_photo: resolvedAvatar,
         };
         setUser(registeredUser);
         localStorage.setItem(KEY, JSON.stringify(registeredUser));

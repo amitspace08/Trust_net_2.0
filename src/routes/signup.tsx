@@ -14,9 +14,14 @@ export function SignupPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+
+  // Derived: show DiceBear preview if no custom URL entered
+  const previewAvatar = avatarUrl.trim() ||
+    (name.trim() ? `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(name.trim())}` : "");
 
   async function handleSignupSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -57,7 +62,7 @@ export function SignupPage() {
 
     setLoading(true);
     try {
-      await signup(nameTrimmed, emailNormalized, password);
+      await signup(nameTrimmed, emailNormalized, password, avatarUrl.trim() || undefined);
       setSuccess(true);
       
       // Delay navigation slightly to let the user see the success message
@@ -101,7 +106,21 @@ export function SignupPage() {
         <h1 className="text-2xl font-bold text-gray-900">Create your account</h1>
         <p className="text-sm text-gray-500 mt-1">Join the TrustNet safety network.</p>
 
-        <form onSubmit={handleSignupSubmit} className="mt-6 flex flex-col gap-4">
+        {/* Avatar preview */}
+          {previewAvatar && (
+            <div className="flex flex-col items-center gap-2 mb-2">
+              <img
+                src={previewAvatar}
+                alt="Avatar preview"
+                className="w-16 h-16 rounded-full border-2 border-[#0d631b]/30 object-cover bg-gray-100"
+              />
+              <span className="text-[10px] text-gray-400">
+                {avatarUrl.trim() ? "Your photo" : "Auto-generated from your name"}
+              </span>
+            </div>
+          )}
+
+        <form onSubmit={handleSignupSubmit} className="mt-2 flex flex-col gap-4">
           <label className="text-sm text-gray-700 flex flex-col gap-1">
             Full name
             <input
@@ -139,6 +158,19 @@ export function SignupPage() {
               className="border border-gray-300 rounded-lg px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-[#0d631b]/40 disabled:bg-gray-50"
               placeholder="At least 6 characters"
             />
+          </label>
+
+          <label className="text-sm text-gray-700 flex flex-col gap-1">
+            Profile photo URL <span className="text-gray-400 font-normal">(optional)</span>
+            <input
+              type="url"
+              disabled={loading || success}
+              value={avatarUrl}
+              onChange={(e) => setAvatarUrl(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-[#0d631b]/40 disabled:bg-gray-50"
+              placeholder="https://example.com/photo.jpg"
+            />
+            <span className="text-[10px] text-gray-400">Leave blank to use an auto-generated avatar</span>
           </label>
 
           {err && <p className="text-sm text-red-600 font-medium mt-1">{err}</p>}

@@ -1,6 +1,7 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { registerAsGuardianAngel, setGuardianAvailability } from "../services/guardianService";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
+import { registerAsGuardianAngel, setGuardianAvailability, declineLayer3, acknowledgeLayer3, getDistance } from "../services/guardianService";
+import { subscribeToSOS } from "../services/sosService";
 import { auth } from "../firebase/firebase";
 
 export const Route = createFileRoute("/guardian")({
@@ -31,9 +32,18 @@ const DEFAULT_PROFILE: GuardianProfile = {
 };
 
 function GuardianPage() {
+  const navigate = useNavigate();
   const [profile, setProfile] = useState<GuardianProfile>(DEFAULT_PROFILE);
   const [agreed, setAgreed] = useState(false);
   const [registering, setRegistering] = useState(false);
+
+  // ── Incoming SOS alert state ─────────────────────────────────────────────
+  const [incomingAlert, setIncomingAlert] = useState<any | null>(null);
+  const [alertDistance, setAlertDistance] = useState<number | null>(null);
+  const [alertCountdown, setAlertCountdown] = useState(60);
+  const [myLoc, setMyLoc] = useState<{ lat: number; lng: number } | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const alertDismissed = useRef(false);
 
   useEffect(() => {
     try {
@@ -43,6 +53,85 @@ function GuardianPage() {
       /* fallback */
     }
   }, []);
+
+  // ── Grab GA's own GPS location once ──────────────────────────────────────
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setMyLoc({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => {/* silently ignore */},
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  }, []);
+
+  // ── Listen for active SOS sessions nearby (2 km) ─────────────────────────
+  useEffect(() => {
+    if (!profile.registered || !profile.available) return;
+    const unsub = subscribeToSOS((sessions) => {
+      if (alertDismissed.current) return;
+      const nearby = sessions.find((s) => {
+        if (!s.latitude || !s.longitude || !myLoc) return false;
+        const dist = getDistance(myLoc.lat, myLoc.lng, s.latitude, s.longitude);
+        return dist <= 2000; // within 2 km
+      });
+      if (nearby && !incomingAlert) {
+        const dist = myLoc
+          ? Math.round(getDistance(myLoc.lat, myLoc.lng, nearby.latitude, nearby.longitude))
+          : null;
+        setIncomingAlert(nearby);
+        setAlertDistance(dist);
+        setAlertCountdown(60);
+        alertDismissed.current = false;
+      }
+    });
+    return () => unsub();
+  }, [profile.registered, profile.available, myLoc, incomingAlert]);
+
+  // ── 60-second countdown while alert is showing ───────────────────────────
+  useEffect(() => {
+    if (!incomingAlert) return;
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    countdownRef.current = setInterval(() => {
+      setAlertCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(countdownRef.current!);
+          // Auto-dismiss on timeout
+          alertDismissed.current = true;
+          setIncomingAlert(null);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
+  }, [incomingAlert]);
+
+  const handleAcceptAlert = async () => {
+    if (!incomingAlert) return;
+    clearInterval(countdownRef.current!);
+    alertDismissed.current = true;
+    try {
+      const uid = getUid();
+      await acknowledgeLayer3(incomingAlert.id, uid);
+    } catch (e) {
+      console.error("acknowledgeLayer3 error:", e);
+    }
+    setIncomingAlert(null);
+    navigate({ to: "/sos-receiver", search: { sessionId: incomingAlert.id, role: "layer3" } });
+  };
+
+  const handleDeclineAlert = async () => {
+    if (!incomingAlert) return;
+    clearInterval(countdownRef.current!);
+    alertDismissed.current = true;
+    try {
+      const uid = getUid();
+      await declineLayer3(incomingAlert.id, uid);
+    } catch (e) {
+      console.error("declineLayer3 error:", e);
+    }
+    setIncomingAlert(null);
+  };
 
   const getUid = () => {
     if (auth.currentUser) return auth.currentUser.uid;
@@ -107,6 +196,80 @@ function GuardianPage() {
 
   return (
     <div className="w-full min-h-screen relative flex flex-col md:flex-row pb-24 md:pb-0 bg-[#faf9fc]">
+
+      {/* ── Incoming SOS Alert Overlay ───────────────────────────────────── */}
+      {incomingAlert && (
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm flex flex-col gap-5 overflow-hidden">
+            {/* Gold pulsing header */}
+            <div className="bg-gradient-to-br from-amber-500 to-orange-600 p-6 flex flex-col items-center gap-3">
+              {/* Pulsing gold ring animation */}
+              <div className="relative flex items-center justify-center">
+                <span className="absolute w-24 h-24 rounded-full bg-amber-400/40 animate-ping" />
+                <span className="absolute w-20 h-20 rounded-full bg-amber-400/50 animate-ping [animation-delay:0.3s]" />
+                <div className="relative z-10 w-16 h-16 rounded-full bg-white/20 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-white text-3xl" style={{ fontVariationSettings: "'FILL' 1" }}>security</span>
+                </div>
+              </div>
+              <h2 className="text-white font-black text-lg tracking-tight text-center">🚨 Emergency Nearby</h2>
+              <p className="text-amber-100 text-xs text-center leading-relaxed">
+                {alertDistance !== null
+                  ? `Someone needs help ~${alertDistance}m from you. Can you respond?`
+                  : "Someone nearby needs urgent help. Can you respond?"}
+              </p>
+            </div>
+
+            {/* 60-second SVG countdown ring */}
+            <div className="flex flex-col items-center gap-1 px-6">
+              <div className="relative w-20 h-20">
+                {(() => {
+                  const r = 34;
+                  const c = 2 * Math.PI * r;
+                  return (
+                    <svg viewBox="0 0 80 80" className="w-full h-full -rotate-90">
+                      <circle cx="40" cy="40" r={r} stroke="#f3f4f6" strokeWidth="7" fill="none" />
+                      <circle
+                        cx="40" cy="40" r={r}
+                        stroke={alertCountdown > 20 ? "#f59e0b" : "#ef4444"}
+                        strokeWidth="7" fill="none"
+                        strokeLinecap="round"
+                        strokeDasharray={c}
+                        strokeDashoffset={c * (1 - alertCountdown / 60)}
+                        className="transition-all duration-1000 ease-linear"
+                      />
+                    </svg>
+                  );
+                })()}
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className={`text-lg font-black leading-none ${alertCountdown <= 20 ? "text-red-600" : "text-amber-600"}`}>
+                    {alertCountdown}
+                  </span>
+                  <span className="text-[8px] text-gray-400 font-bold uppercase">secs</span>
+                </div>
+              </div>
+              <p className="text-[10px] text-gray-400 font-semibold">Respond within 60 seconds</p>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex gap-3 px-6 pb-6">
+              <button
+                onClick={handleDeclineAlert}
+                className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs py-3.5 rounded-xl transition active:scale-[0.98] flex items-center justify-center gap-1.5"
+              >
+                <span className="material-symbols-outlined text-sm">close</span>
+                I can't help
+              </button>
+              <button
+                onClick={handleAcceptAlert}
+                className="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs py-3.5 rounded-xl transition active:scale-[0.98] shadow-lg flex items-center justify-center gap-1.5"
+              >
+                <span className="material-symbols-outlined text-sm">directions_run</span>
+                I can help!
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Side Nav */}
       <nav className="hidden md:flex flex-col bg-white text-gray-800 h-full rounded-r-2xl shadow-sm border-r border-gray-150 w-72 max-w-[80vw] p-5 fixed left-0 top-0 z-50">
         <div className="flex items-center gap-4 mb-8 pt-4">

@@ -82,7 +82,7 @@ function SosEmergencyPage() {
   const [activeState, setActiveState] = useState<
     "countdown" | "active" | "l2-searching" | "l3-searching"
   >("countdown");
-  const [secondsLeft, setSecondsLeft] = useState(5);
+  const [secondsLeft, setSecondsLeft] = useState(10);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [layer2Contacts, setLayer2Contacts] = useState<Layer2Candidate[]>([]);
 
@@ -627,7 +627,7 @@ function SosEmergencyPage() {
               fill="none"
               strokeLinecap="round"
               strokeDasharray={c}
-              strokeDashoffset={c * (1 - secondsLeft / 5)}
+              strokeDashoffset={c * (1 - secondsLeft / 10)}
               className="transition-all duration-1000 ease-linear"
             />
           </svg>
@@ -1110,8 +1110,8 @@ function SosEmergencyPage() {
                 }`}
               >
                 {layer3Exhausted
-                  ? `Walk to the nearest safe space now. Help is registered there. (${nearestSpace.name} is ${nearestSpace.distance}m away)`
-                  : `${nearestSpace.name} is ${nearestSpace.distance}m from your location.`}
+                  ? `Walk to the nearest safe space now. Help is registered there. (${nearestSpace.name} is ${nearestSpace.distance}m · ~${Math.max(1, Math.ceil(nearestSpace.distance / 80))} min walk)`
+                  : `${nearestSpace.name} is ${nearestSpace.distance}m away · ~${Math.max(1, Math.ceil(nearestSpace.distance / 80))} min walk`}
               </p>
             </div>
             <a

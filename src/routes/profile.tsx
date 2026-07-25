@@ -18,6 +18,41 @@ function ProfilePage() {
   const [sharingLocation, setSharingLocation] = useState(true);
   const [isGuardianAngel, setIsGuardianAngel] = useState(false);
 
+  // Photo editing state
+  const [editingPhoto, setEditingPhoto] = useState(false);
+  const [newPhotoUrl, setNewPhotoUrl] = useState("");
+  const [photoSaving, setPhotoSaving] = useState(false);
+  const [photoSaved, setPhotoSaved] = useState(false);
+
+  const handleSavePhoto = async () => {
+    const url = newPhotoUrl.trim();
+    if (!url) return;
+    setPhotoSaving(true);
+    try {
+      // Update Firestore
+      const { getFirestore, doc, updateDoc } = await import("firebase/firestore");
+      if (user?.id) {
+        const db = getFirestore();
+        await updateDoc(doc(db, "users", user.id), { photoURL: url, profile_photo: url });
+      }
+      // Update localStorage session
+      const raw = localStorage.getItem("trustnet_auth_user");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        parsed.avatar = url;
+        parsed.profile_photo = url;
+        localStorage.setItem("trustnet_auth_user", JSON.stringify(parsed));
+      }
+      setPhotoSaved(true);
+      setEditingPhoto(false);
+      setNewPhotoUrl("");
+      setTimeout(() => setPhotoSaved(false), 2500);
+    } catch (e) {
+      console.error("Photo update failed:", e);
+    }
+    setPhotoSaving(false);
+  };
+
   // Check Guardian Angel registration status
   useEffect(() => {
     try {
@@ -84,6 +119,14 @@ function ProfilePage() {
             <p className="text-xs text-gray-500">Trust Score: 98</p>
             <p className="text-xs text-[#0d631b] font-semibold mt-0.5">Safety Status: Protected</p>
           </div>
+          {/* Change photo button */}
+          <button
+            onClick={() => { setEditingPhoto(true); setNewPhotoUrl(avatarUrl); }}
+            className="absolute -bottom-1 -right-1 bg-[#0d631b] text-white w-8 h-8 rounded-full flex items-center justify-center border-2 border-white shadow-md hover:bg-[#0a5015] transition"
+            title="Change profile photo"
+          >
+            <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>photo_camera</span>
+          </button>
         </div>
         <ul className="flex flex-col gap-1.5">
           <li>
@@ -233,6 +276,30 @@ function ProfilePage() {
               </span>
             </div>
           </div>
+          {photoSaved && (
+            <span className="text-[10px] text-emerald-600 font-bold animate-bounce">Photo updated!</span>
+          )}
+          {editingPhoto && (
+            <div className="w-full max-w-xs flex flex-col gap-2 bg-white border border-gray-200 rounded-2xl p-4 shadow-md">
+              <p className="text-xs font-bold text-gray-700">Paste a photo URL</p>
+              {newPhotoUrl && (
+                <img src={newPhotoUrl} alt="Preview" className="w-12 h-12 rounded-full object-cover border mx-auto" onError={(e) => (e.currentTarget.style.display = "none")} />
+              )}
+              <input
+                type="url"
+                value={newPhotoUrl}
+                onChange={(e) => setNewPhotoUrl(e.target.value)}
+                placeholder="https://example.com/photo.jpg"
+                className="border border-gray-300 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#0d631b]/40"
+              />
+              <div className="flex gap-2">
+                <button onClick={() => setEditingPhoto(false)} className="flex-1 text-xs py-2 rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-50 transition">Cancel</button>
+                <button onClick={handleSavePhoto} disabled={photoSaving || !newPhotoUrl.trim()} className="flex-1 text-xs py-2 rounded-xl bg-[#0d631b] text-white font-bold disabled:opacity-50 transition">
+                  {photoSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          )}
           <div>
             <h1 className="text-2xl font-bold text-gray-900">{user?.name || "Elena Rodriguez"}</h1>
             <p className="text-sm text-gray-500 mt-1">TrustNet Guardian Member</p>

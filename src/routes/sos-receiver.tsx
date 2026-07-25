@@ -803,7 +803,7 @@ function SosReceiverPage() {
                       ? "Primary contacts unavailable • Voluntarily response request"
                       : isLayer2
                         ? `Priya Sharma is a mutual friend of ${mutualContactName}`
-                        : "Triggered 1 min ago • Distance: 0.85 km"}
+                        : `Triggered moments ago · ${distance > 0 ? `${distance} km away · ~${eta} min` : "Locating..."}`}
                   </p>
                 </div>
               </div>
