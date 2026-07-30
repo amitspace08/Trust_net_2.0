@@ -37,7 +37,6 @@ export function clearSOSTimers(sessionId: string) {
   const timers = sosTimers.get(sessionId);
   if (timers) {
     if (timers.followUpTimeout) clearTimeout(timers.followUpTimeout);
-    if (timers.layer2Timeout) clearTimeout(timers.layer2Timeout);
     if (timers.locationInterval) clearInterval(timers.locationInterval);
     sosTimers.delete(sessionId);
   }
@@ -148,12 +147,8 @@ export async function triggerSOS(uid: string, arg2?: number | string[], arg3?: n
     // Follow‑up notification at 45 seconds
     const followUpTimeout = setTimeout(() => notifyLayer1FollowUp(docRef.id), 45_000);
 
-    // Trigger Layer 2 escalation after 90 seconds
-    const layer2Timeout = setTimeout(() => triggerLayer2(docRef.id, new GeoPoint(lat ?? 28.6139, lng ?? 77.209)), 90_000);
-
     sosTimers.set(docRef.id, {
       followUpTimeout,
-      layer2Timeout,
     });
 
     return docRef.id;
@@ -414,8 +409,8 @@ export async function triggerLayer2(sessionId: string, distressedLocation: GeoPo
       session.triggeredBy,
     );
 
-    // Start 120-second timeout for Layer 2
-    startLayer2Timeout(sessionId);
+    // Start 120-second timeout for Layer 2 is now handled by Cloud Functions
+    // startLayer2Timeout(sessionId);
 
     return ranked;
   } catch (err) {
@@ -479,38 +474,7 @@ export async function declineLayer2(sessionId: string, responderUID: string) {
 // =======================================
 
 export function startLayer2Timeout(sessionId: string) {
-  // Clear any existing Layer 2 timeout first
-  const timers = sosTimers.get(sessionId) || {};
-  if (timers.layer2Timeout) {
-    clearTimeout(timers.layer2Timeout);
-  }
-
-  const timeout = setTimeout(async () => {
-    try {
-      const ref = doc(db, "sos_sessions", sessionId);
-      const snap = await getDoc(ref);
-      if (!snap.exists()) return;
-      const data = snap.data();
-
-      // If already resolved, cancelled, or layerActive is not 2, stop
-      if (data.status !== "active" || data.layerActive !== 2 || data.layer2Acknowledged) return;
-
-      console.log("Layer 2 timeout — ready for Layer 3 escalation");
-
-      await updateDoc(ref, {
-        layerActive: 3,
-        layer2Timeout: serverTimestamp(),
-      });
-
-      // Automatically trigger Layer 3
-      await triggerLayer3(sessionId);
-    } catch (err) {
-      console.error("Error during Layer 2 timeout escalation:", err);
-    }
-  }, 120_000);
-
-  timers.layer2Timeout = timeout;
-  sosTimers.set(sessionId, timers);
+  // Handled by Firebase Cloud Functions Server-Side.
 }
 
 // =======================================

@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { loadContacts, Contact, getLayer2Candidates, Layer2Candidate } from "../lib/contacts-db";
+import { Contact, Layer2Candidate } from "../types/contacts";
+import { useLayer1Contacts, useLayer2Contacts } from "../hooks/useContacts";
 import { triggerLayer2, triggerSOS, endSOS } from "../services/sosService";
 import {
   collection,
@@ -18,7 +19,23 @@ import { triggerLayer3, updateGuardianRating, getDistance } from "../services/gu
 import { getNearestSafeSpace } from "../services/safeSpaceService";
 import { updateLiveSOSLocation } from "../services/locationService";
 import { useAuth } from "../lib/auth";
-import { GoogleMap, Marker, Circle, Polyline, useJsApiLoader } from "@react-google-maps/api";
+import { MapContainer, TileLayer, Marker, Circle, Polyline, Tooltip, useMap } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+
+const createCustomIcon = (color: string) => L.divIcon({
+  className: 'custom-leaflet-icon',
+  html: `<div style="background-color: ${color}; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
+  iconSize: [24, 24],
+  iconAnchor: [12, 12]
+});
+
+const redIcon = createCustomIcon('#ef4444');
+const tealIcon = createCustomIcon('#0d9488');
+const amberIcon = createCustomIcon('#f59e0b');
+const greyIcon = createCustomIcon('#9ca3af');
+const greenIcon = createCustomIcon('#10b981');
+const blueIcon = createCustomIcon('#3b82f6');
 
 // Helper to compute percentage positions relative to center for mock map rendering
 const getRelativePercent = (lat: number, lng: number, centerLat: number, centerLng: number) => {
@@ -43,20 +60,20 @@ export const Route = createFileRoute("/sos")({
 function SosEmergencyPage() {
   const router = useRouter();
   const { user } = useAuth();
-  const { isLoaded } = useJsApiLoader({
-    googleMapsApiKey: "AIzaSyAyqOvmQjDAp7Mwi5CYUUiSNrjqd5kyuEk",
-  });
   const [sessionId, setSessionId] = useState<string | null>(() =>
     typeof window === "undefined" ? null : localStorage.getItem("trustnet_active_sos_session"),
   );
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [googlePoint, setGooglePoint] = useState<any>(null);
 
-  useEffect(() => {
-    if (isLoaded && typeof window !== "undefined" && (window as any).google) {
-      setGooglePoint(new (window as any).google.maps.Point(0, -30));
-    }
-  }, [isLoaded]);
+  // MapResizer to fix rendering edge case
+  const MapResizer = () => {
+    const map = useMap();
+    useEffect(() => {
+      const timer = setTimeout(() => map.invalidateSize(), 250);
+      return () => clearTimeout(timer);
+    }, [map]);
+    return null;
+  };
 
   // Get location when component mounts (continuous tracking)
   useEffect(() => {
@@ -80,15 +97,15 @@ function SosEmergencyPage() {
   }, []);
 
   const [activeState, setActiveState] = useState<
-    "countdown" | "active" | "l2-searching" | "l3-searching"
+    "countdown" | "active" | "l2-searching" | "l3-searching" | "police-searching"
   >("countdown");
   const [secondsLeft, setSecondsLeft] = useState(10);
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [layer2Contacts, setLayer2Contacts] = useState<Layer2Candidate[]>([]);
+  const contacts = useLayer1Contacts();
+  const layer2Contacts = useLayer2Contacts();
 
-  // Dynamic timeouts (L1 -> 90s, L2 -> 90s)
-  const [escalationTime, setEscalationTime] = useState(90);
-  const [layer3EscalationTime, setLayer3EscalationTime] = useState(90);
+  // Dynamic timeouts (L1 -> 45s, L2 -> 45s)
+  const [escalationTime, setEscalationTime] = useState(45);
+  const [layer3EscalationTime, setLayer3EscalationTime] = useState(45);
 
   const [isLayer2Escalated, setIsLayer2Escalated] = useState(false);
   const [isLayer3Escalated, setIsLayer3Escalated] = useState(false);
@@ -112,13 +129,17 @@ function SosEmergencyPage() {
   // Post-SOS GA rating states
   const [gaRating, setGaRating] = useState<number | null>(null);
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
-  const [gaSecondsLeft, setGaSecondsLeft] = useState(60);
+  const [gaSecondsLeft, setGaSecondsLeft] = useState(30);
 
-  // Load contacts lists
-  useEffect(() => {
-    setContacts(loadContacts());
-    setLayer2Contacts(getLayer2Candidates());
-  }, []);
+  // Directions and Routes
+  const [directionsToSafeSpace, setDirectionsToSafeSpace] = useState<any>(null);
+  const [lastRoutedLocation, setLastRoutedLocation] = useState<{lat: number, lng: number} | null>(null);
+  
+  const [responderLocation, setResponderLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [responderRoute, setResponderRoute] = useState<any>(null);
+  const [lastResponderRoutedLocation, setLastResponderRoutedLocation] = useState<{lat: number, lng: number} | null>(null);
+
+  const [pulseRadius, setPulseRadius] = useState(500);
 
   // Real-time listener for this SOS session (never a shared demo document).
   useEffect(() => {
@@ -148,6 +169,9 @@ function SosEmergencyPage() {
           setLayer3Declined(data.layer3Declined);
         }
         if (data.layer3Exhausted !== undefined) {
+          if (data.layer3Exhausted === true && !layer3Exhausted) {
+             setActiveState("police-searching");
+          }
           setLayer3Exhausted(data.layer3Exhausted);
         }
       } else {
@@ -230,6 +254,73 @@ function SosEmergencyPage() {
     fetchNearest();
   }, [location]);
 
+  // Track Responder Location if someone has acknowledged
+  useEffect(() => {
+    if (!responderUID) return;
+    const unsubscribe = onSnapshot(doc(db, "user_locations", responderUID), (snap) => {
+      if (snap.exists() && snap.data().latitude) {
+        setResponderLocation({ lat: snap.data().latitude, lng: snap.data().longitude });
+      }
+    });
+    return () => unsubscribe();
+  }, [responderUID]);
+
+  // Directions to Safe Space
+  useEffect(() => {
+    if (!location || !nearestSpace || !(window as any).google) return;
+    if (lastRoutedLocation) {
+      const dist = getDistance(location.lat, location.lng, lastRoutedLocation.lat, lastRoutedLocation.lng);
+      if (dist < 50) return;
+    }
+    const fetchRoute = async () => {
+      const directionsService = new (window as any).google.maps.DirectionsService();
+      try {
+        const results = await directionsService.route({
+          origin: location,
+          destination: { lat: nearestSpace.latitude, lng: nearestSpace.longitude },
+          travelMode: (window as any).google.maps.TravelMode.WALKING,
+        });
+        setDirectionsToSafeSpace(results);
+        setLastRoutedLocation(location);
+      } catch (err) {
+        console.error("Directions to safe space failed", err);
+      }
+    };
+    fetchRoute();
+  }, [location, nearestSpace]);
+
+  // Directions from Responder
+  useEffect(() => {
+    if (!location || !responderLocation || !(window as any).google) return;
+    if (lastResponderRoutedLocation) {
+      const dist = getDistance(responderLocation.lat, responderLocation.lng, lastResponderRoutedLocation.lat, lastResponderRoutedLocation.lng);
+      if (dist < 50) return;
+    }
+    const fetchRoute = async () => {
+      const directionsService = new (window as any).google.maps.DirectionsService();
+      try {
+        const results = await directionsService.route({
+          origin: responderLocation,
+          destination: location,
+          travelMode: (window as any).google.maps.TravelMode.WALKING,
+        });
+        setResponderRoute(results);
+        setLastResponderRoutedLocation(responderLocation);
+      } catch (err) {
+        console.error("Directions to responder failed", err);
+      }
+    };
+    fetchRoute();
+  }, [location, responderLocation]);
+
+  // Pulse animation for coverage circles
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setPulseRadius((prev) => (prev === 500 ? 530 : 500));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Handle countdown logic
   useEffect(() => {
     if (activeState !== "countdown") return;
@@ -280,7 +371,7 @@ function SosEmergencyPage() {
   useEffect(() => {
     if (!isLayer3Escalated || isSafeEnded || responderName) return;
     if (gaSecondsLeft <= 0) {
-      setGaSecondsLeft(60);
+      setGaSecondsLeft(30);
       return;
     }
     const timer = setTimeout(() => {
@@ -292,7 +383,7 @@ function SosEmergencyPage() {
   // Reset GA timer when a GA declines (which signals moving to the next GA)
   useEffect(() => {
     if (isLayer3Escalated) {
-      setGaSecondsLeft(60);
+      setGaSecondsLeft(30);
     }
   }, [layer3Declined.length, isLayer3Escalated]);
 
@@ -332,6 +423,15 @@ function SosEmergencyPage() {
     }, 4000);
     return () => clearTimeout(timer);
   }, [activeState, sessionId]);
+
+  // Police searching transition
+  useEffect(() => {
+    if (activeState !== "police-searching") return;
+    const timer = setTimeout(() => {
+      setActiveState("active");
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [activeState]);
 
   // Trigger default L1 on mount when countdown finishes
   useEffect(() => {
@@ -588,6 +688,58 @@ function SosEmergencyPage() {
     );
   }
 
+  // ── RENDER SEARCHING POLICE SCREEN ──
+  if (activeState === "police-searching") {
+    return (
+      <div className="w-full min-h-screen bg-red-900 flex flex-col justify-between items-center p-6 text-white select-none animate-fade-in relative">
+        <div className="absolute inset-0 bg-gradient-to-b from-red-950 via-red-900 to-red-800 opacity-95 pointer-events-none" />
+
+        <header className="text-center pt-12 z-10">
+          <span
+            className="material-symbols-outlined text-4xl text-red-300 animate-pulse"
+            style={{ fontVariationSettings: "'FILL' 1" }}
+          >
+            local_police
+          </span>
+          <h1 className="text-xl font-bold tracking-tight mt-3">Police Escalation</h1>
+        </header>
+
+        <div className="flex flex-col items-center justify-center gap-6 z-10 max-w-xs text-center">
+          <div className="relative w-28 h-28 flex items-center justify-center">
+            <span className="absolute inset-0 rounded-full border-4 border-red-500/20 animate-ping" />
+            <span className="absolute inset-4 rounded-full border-4 border-red-400/30 animate-pulse" />
+            <div className="w-16 h-16 rounded-full bg-red-500/10 border-2 border-red-300 flex items-center justify-center shadow-lg">
+              <span
+                className="material-symbols-outlined text-2xl text-red-200 animate-spin"
+                style={{ animationDuration: "3s" }}
+              >
+                emergency
+              </span>
+            </div>
+          </div>
+          <div>
+            <h2 className="text-base font-extrabold tracking-tight text-white/95">
+              No Guardian Angels available.
+            </h2>
+            <p className="text-xs text-red-200/90 leading-relaxed mt-2.5 font-sans">
+              Directly alerting local authorities...
+            </p>
+          </div>
+        </div>
+
+        <div className="w-full max-w-md pb-8 z-10 flex flex-col items-center">
+          <button
+            onClick={handleEndSosWithDoubleTap}
+            className="w-full bg-white/10 hover:bg-white/15 text-white border border-white/20 font-bold py-4 rounded-xl shadow-lg transition active:scale-[0.98] flex items-center justify-center gap-2 uppercase text-xs"
+          >
+            <span className="material-symbols-outlined text-sm">check_circle</span>I am safe — end
+            SOS
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ── RENDER COUNTDOWN SCREEN ──
   if (activeState === "countdown") {
     return (
@@ -711,248 +863,81 @@ function SosEmergencyPage() {
 
       {/* 2. Map Canvas area */}
       <div className="flex-grow w-full relative overflow-hidden bg-gray-100 flex flex-col justify-center items-center h-[350px]">
-        {isLoaded && location ? (
-          <GoogleMap
-            center={location}
+        {location ? (
+          <MapContainer
+            center={[location.lat, location.lng]}
             zoom={15}
-            mapContainerStyle={{
-              width: "100%",
-              height: "100%",
-              position: "absolute",
-              top: 0,
-              left: 0,
-            }}
-            options={{
-              disableDefaultUI: true,
-              zoomControl: false,
-            }}
+            zoomControl={false}
+            style={{ width: "100%", height: "100%", position: "absolute", top: 0, left: 0 }}
           >
+            <MapResizer />
+            <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
+            
             {/* Live User Marker */}
-            <Marker
-              position={location}
-              label={{
-                text: "Priya (You)",
-                color: "#ffffff",
-                fontWeight: "800",
-              }}
-              icon={{
-                url: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
-              }}
-            />
+            <Marker position={[location.lat, location.lng]} icon={redIcon}>
+              <Tooltip permanent direction="top" offset={[0, -12]} className="font-bold">Priya (You)</Tooltip>
+            </Marker>
 
             {/* Coverage radius circle representing active SOS boundary */}
-            {isLayer3Escalated ? (
-              <Circle
-                center={location}
-                radius={500}
-                options={{
-                  strokeColor: "#f59e0b",
-                  strokeOpacity: 0.8,
-                  strokeWeight: 2,
-                  fillColor: "#f59e0b",
-                  fillOpacity: 0.05,
-                  clickable: false,
-                }}
-              />
-            ) : isLayer2Escalated ? (
-              <Circle
-                center={location}
-                radius={500}
-                options={{
-                  strokeColor: "#0d9488",
-                  strokeOpacity: 0.8,
-                  strokeWeight: 2,
-                  fillColor: "#0d9488",
-                  fillOpacity: 0.05,
-                  clickable: false,
-                }}
-              />
-            ) : (
-              <Circle
-                center={location}
-                radius={100}
-                options={{
-                  strokeColor: "#8b5cf6",
-                  strokeOpacity: 0.8,
-                  strokeWeight: 2,
-                  fillColor: "#8b5cf6",
-                  fillOpacity: 0.05,
-                  clickable: false,
-                }}
-              />
-            )}
+            <Circle
+              center={[location.lat, location.lng]}
+              radius={isLayer3Escalated ? pulseRadius : isLayer2Escalated ? pulseRadius : pulseRadius / 5}
+              pathOptions={{
+                color: isLayer3Escalated ? "#f59e0b" : isLayer2Escalated ? "#0d9488" : "#8b5cf6",
+                fillColor: isLayer3Escalated ? "#f59e0b" : isLayer2Escalated ? "#0d9488" : "#8b5cf6",
+                fillOpacity: 0.05,
+                weight: 2
+              }}
+            />
 
             {/* Nearest Safe Space Pin */}
             {nearestSpace && (
               <>
-                <Circle
-                  center={{ lat: nearestSpace.latitude, lng: nearestSpace.longitude }}
-                  radius={80} // 80m high-visibility pulsing highlight
-                  options={{
-                    strokeColor: "#10b981",
-                    strokeOpacity: 0.9,
-                    strokeWeight: 2,
-                    fillColor: "#10b981",
-                    fillOpacity: 0.15,
-                    clickable: false,
-                  }}
-                />
-                <Marker
-                  position={{ lat: nearestSpace.latitude, lng: nearestSpace.longitude }}
-                  label={{
-                    text: `Safe Space: ${nearestSpace.name}`,
-                    color: "#047857",
-                    fontWeight: "700",
-                  }}
-                  icon={googlePoint ? {
-                    path: "M -10,10 L -10,-6 L 0,-12 L 10,-6 L 10,10 Z M -6,10 L -6,4 L 6,4 L 6,10 Z",
-                    fillColor: "#10b981", // Emerald Green
-                    fillOpacity: 1.0,
-                    strokeColor: "#FFFFFF",
-                    strokeWeight: 2,
-                    scale: 1.1,
-                    labelOrigin: googlePoint,
-                  } : undefined}
-                />
+                <Circle center={[nearestSpace.latitude, nearestSpace.longitude]} radius={80} pathOptions={{ color: "#10b981", fillOpacity: 0.15, weight: 2 }} />
+                <Marker position={[nearestSpace.latitude, nearestSpace.longitude]} icon={greenIcon}>
+                   <Tooltip permanent direction="bottom" offset={[0, 12]} className="font-bold text-emerald-700">Safe Space: {nearestSpace.name}</Tooltip>
+                </Marker>
+                <Polyline positions={[[location.lat, location.lng], [nearestSpace.latitude, nearestSpace.longitude]]} pathOptions={{ color: "#10b981", weight: 3, dashArray: "10, 10" }} />
               </>
-            )}
-
-            {/* Dashed line to Nearest Safe Space */}
-            {nearestSpace && (
-              <Polyline
-                path={[
-                  location,
-                  { lat: nearestSpace.latitude, lng: nearestSpace.longitude },
-                ]}
-                options={{
-                  strokeColor: "#10b981",
-                  strokeOpacity: 0,
-                  strokeWeight: 3.5,
-                  icons: [
-                    {
-                      icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 },
-                      offset: "0",
-                      repeat: "15px",
-                    },
-                  ],
-                }}
-              />
             )}
 
             {/* Layer 2 Candidate Mock Pins */}
             {isLayer2Escalated && !isLayer3Escalated && !responderName && (
               <>
-                <Marker
-                  position={{ lat: location.lat + 0.002, lng: location.lng + 0.002 }}
-                  label={{
-                    text: "Layer 2 — Rahul",
-                    color: "#0f766e",
-                    fontWeight: "600",
-                  }}
-                  icon={googlePoint ? {
-                    path: "M 0,0 C -2,-20 -10,-22 -10,-30 C -10,-36 -5,-40 0,-40 C 5,-40 10,-36 10,-30 C 10,-22 2,-20 0,0 Z",
-                    fillColor: "#0d9488", // Teal
-                    fillOpacity: 1,
-                    strokeColor: "#FFFFFF",
-                    strokeWeight: 1.5,
-                    scale: 0.9,
-                    labelOrigin: googlePoint,
-                  } : undefined}
-                />
-                <Marker
-                  position={{ lat: location.lat - 0.002, lng: location.lng - 0.002 }}
-                  label={{
-                    text: "Layer 2 — Dev",
-                    color: "#0f766e",
-                    fontWeight: "600",
-                  }}
-                  icon={googlePoint ? {
-                    path: "M 0,0 C -2,-20 -10,-22 -10,-30 C -10,-36 -5,-40 0,-40 C 5,-40 10,-36 10,-30 C 10,-22 2,-20 0,0 Z",
-                    fillColor: "#0d9488", // Teal
-                    fillOpacity: 1,
-                    strokeColor: "#FFFFFF",
-                    strokeWeight: 1.5,
-                    scale: 0.9,
-                    labelOrigin: googlePoint,
-                  } : undefined}
-                />
+                <Marker position={[location.lat + 0.002, location.lng + 0.002]} icon={tealIcon}>
+                  <Tooltip permanent direction="top">Layer 2 — Rahul</Tooltip>
+                </Marker>
+                <Marker position={[location.lat - 0.002, location.lng - 0.002]} icon={tealIcon}>
+                   <Tooltip permanent direction="top">Layer 2 — Dev</Tooltip>
+                </Marker>
               </>
             )}
 
             {/* Guardian Angel Pins */}
-            {isLayer3Escalated &&
-              gaLocations.map((ga) => {
+            {isLayer3Escalated && gaLocations.map((ga) => {
                 const isDeclined = layer3Declined.includes(ga.uid);
-                const isActiveCandidate =
-                  !isDeclined &&
-                  layer3Alerted.find((uid) => !layer3Declined.includes(uid)) === ga.uid;
-
+                const isActiveCandidate = !isDeclined && layer3Alerted.find((uid) => !layer3Declined.includes(uid)) === ga.uid;
+                
                 return (
-                  <Marker
-                    key={ga.uid}
-                    position={{ lat: ga.latitude, lng: ga.longitude }}
-                    label={{
-                      text: `GA — ${ga.name}${isDeclined ? " (No Response)" : ""}`,
-                      color: isDeclined ? "#6b7280" : "#d97706",
-                      fontWeight: "700",
-                    }}
-                    icon={googlePoint ? {
-                      path: "M 0,-15 L 12,-10 L 12,0 C 12,8 0,16 0,20 C 0,16 -12,8 -12,0 L -12,-10 Z",
-                      fillColor: isDeclined
-                        ? "#9CA3AF" // Grey for declined GA
-                        : isActiveCandidate
-                          ? "#F59E0B" // Gold/Amber for active candidate
-                          : "#FCD34D", // Light gold for other GAs
-                      fillOpacity: 1,
-                      strokeColor: "#FFFFFF",
-                      strokeWeight: 1.5,
-                      scale: 1.1,
-                      labelOrigin: googlePoint,
-                    } : undefined}
-                  />
-                );
-              })}
+                  <Marker key={ga.uid} position={[ga.latitude, ga.longitude]} icon={isDeclined ? greyIcon : isActiveCandidate ? amberIcon : amberIcon}>
+                    <Tooltip permanent direction="top">{`GA — ${ga.name}${isDeclined ? " (No Response)" : ""}`}</Tooltip>
+                  </Marker>
+                )
+            })}
 
             {/* Responding Helper route and Pin */}
             {responderName && (
               <>
-                <Polyline
-                  path={[
-                    location,
-                    gaLocations.length > 0
-                      ? { lat: gaLocations[0].latitude, lng: gaLocations[0].longitude }
-                      : { lat: location.lat + 0.002, lng: location.lng + 0.002 },
-                  ]}
-                  options={{
-                    strokeColor: "#3b82f6",
-                    strokeOpacity: 0.9,
-                    strokeWeight: 4,
-                  }}
+                <Polyline 
+                  positions={[[location.lat, location.lng], gaLocations.length > 0 ? [gaLocations[0].latitude, gaLocations[0].longitude] : [location.lat + 0.002, location.lng + 0.002]]}
+                  pathOptions={{ color: "#3b82f6", weight: 4 }}
                 />
-                <Marker
-                  position={
-                    gaLocations.length > 0
-                      ? { lat: gaLocations[0].latitude, lng: gaLocations[0].longitude }
-                      : { lat: location.lat + 0.002, lng: location.lng + 0.002 }
-                  }
-                  label={{
-                    text: `${responderName} (Responding!)`,
-                    color: "#1d4ed8",
-                    fontWeight: "800",
-                  }}
-                  icon={googlePoint ? {
-                    path: "M 0,0 C -2,-20 -10,-22 -10,-30 C -10,-36 -5,-40 0,-40 C 5,-40 10,-36 10,-30 C 10,-22 2,-20 0,0 Z",
-                    fillColor: "#3b82f6", // Blue
-                    fillOpacity: 1,
-                    strokeColor: "#FFFFFF",
-                    strokeWeight: 1.5,
-                    scale: 1.0,
-                    labelOrigin: googlePoint,
-                  } : undefined}
-                />
+                <Marker position={gaLocations.length > 0 ? [gaLocations[0].latitude, gaLocations[0].longitude] : [location.lat + 0.002, location.lng + 0.002]} icon={blueIcon}>
+                   <Tooltip permanent direction="top" className="text-blue-700 font-bold">{responderName} (Responding!)</Tooltip>
+                </Marker>
               </>
             )}
-          </GoogleMap>
+          </MapContainer>
         ) : (
           <div className="w-full h-full bg-gray-100 flex items-center justify-center font-bold text-gray-500 animate-pulse">
             Loading Live Map...

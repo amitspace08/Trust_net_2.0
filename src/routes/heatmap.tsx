@@ -3,7 +3,12 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../lib/auth";
 import { getDistance } from "../services/guardianService";
 import { UserAvatar } from "../components/ui/UserAvatar";
-import { loadContacts, Contact } from "../lib/contacts-db";
+import { Contact } from "../types/contacts";
+import { useLayer1Contacts } from "../hooks/useContacts";
+import { getAreaScore, submitRating } from "../services/safetyRatingService";
+import { getNearbyReports, submitReport, IncidentReport } from "../services/reportService";
+import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
 
 export const Route = createFileRoute("/heatmap")({
   head: () => ({
@@ -12,43 +17,78 @@ export const Route = createFileRoute("/heatmap")({
   component: HeatmapPage,
 });
 
+function MapResizer() {
+  const map = useMap();
+  useEffect(() => {
+    // Slight delay ensures DOM has painted the container's final dimensions
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [map]);
+  return null;
+}
+
 function HeatmapPage() {
   const { user } = useAuth();
   const avatarUrl = user?.avatar || user?.profile_photo || "";
   const navigate = useNavigate();
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  const contacts = useLayer1Contacts();
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [isNightMode, setIsNightMode] = useState(false);
 
-  interface StoredReport {
-    id: string;
-    type: string;
-    location: string;
-    note: string;
-    at: number;
-  }
+  // Hardcoded coordinates for demo (Jaipur)
+  const LAT = 26.9124;
+  const LNG = 75.7873;
 
-  const [reports, setReports] = useState<StoredReport[]>([]);
+  const [reports, setReports] = useState<IncidentReport[]>([]);
   const [showReportsModal, setShowReportsModal] = useState(false);
+  const [showSubmitReportModal, setShowSubmitReportModal] = useState(false);
+  const [reportType, setReportType] = useState("other");
+  const [reportNote, setReportNote] = useState("");
+  const [reportSuccess, setReportSuccess] = useState(false);
 
   // Safety Rating States
-  interface SafetyRating {
-    score: number;
-    tags: string[];
-  }
-
-  const [ratings, setRatings] = useState<SafetyRating[]>([]);
+  const [avgScore, setAvgScore] = useState<number>(0);
+  const [ratingCount, setRatingCount] = useState<number>(0);
+  const [topTags, setTopTags] = useState<string[]>([]);
+  
   const [showScorePopup, setShowScorePopup] = useState(false);
   const [showRateModal, setShowRateModal] = useState(false);
   const [ratingSuccess, setRatingSuccess] = useState(false);
   const [newScore, setNewScore] = useState<number | null>(null);
   const [newTags, setNewTags] = useState<string[]>([]);
 
-  const SEED_RATINGS: SafetyRating[] = [
-    { score: 8, tags: ["Welllit", "Police presence"] },
-    { score: 7, tags: ["Welllit", "Crowded"] },
-    { score: 7, tags: ["Police presence"] },
-  ];
+  // Maps and Routing States
+  const [routePolyline, setRoutePolyline] = useState<[number, number][] | null>(null);
+  const [distance, setDistance] = useState<string>("");
+  const [duration, setDuration] = useState<string>("");
+  const [isRouting, setIsRouting] = useState(false);
+
+  const calculateRoute = async () => {
+    setIsRouting(true);
+    try {
+      // Simulate walking route from slightly south-west of the center area
+      const origin = { lat: LAT - 0.005, lng: LNG - 0.005 };
+      const dest = { lat: LAT, lng: LNG };
+      const res = await fetch(`https://router.project-osrm.org/route/v1/foot/${origin.lng},${origin.lat};${dest.lng},${dest.lat}?overview=full&geometries=geojson`);
+      const data = await res.json();
+      if (data.routes && data.routes.length > 0) {
+        const route = data.routes[0];
+        // geojson is [lng, lat], polyline needs [lat, lng]
+        const latLngs = route.geometry.coordinates.map((coord: any) => [coord[1], coord[0]]);
+        setRoutePolyline(latLngs);
+        setDistance((route.distance / 1000).toFixed(2) + " km");
+        setDuration(Math.ceil(route.duration / 60) + " mins");
+      } else {
+        alert("Could not calculate a safe route.");
+      }
+    } catch (error: any) {
+      console.error("Error calculating route:", error);
+      alert(`Could not calculate a safe route. Reason: ${error?.message || error?.code || JSON.stringify(error)}`);
+    }
+    setIsRouting(false);
+  };
 
   const TYPES = [
     { id: "suspicious", icon: "visibility", label: "Suspicious activity" },
@@ -59,72 +99,62 @@ function HeatmapPage() {
     { id: "other", icon: "more_horiz", label: "Other" },
   ];
 
-  const avgScore =
-    ratings.length > 0
-      ? Number((ratings.reduce((acc, curr) => acc + curr.score, 0) / ratings.length).toFixed(1))
-      : 0;
-
-  const getTopTags = () => {
-    const tagCounts: Record<string, number> = {};
-    ratings.forEach((r) => {
-      r.tags.forEach((t) => {
-        tagCounts[t] = (tagCounts[t] || 0) + 1;
-      });
-    });
-    return Object.entries(tagCounts)
-      .sort((a, b) => b[1] - a[1])
-      .map(([tag]) => tag)
-      .slice(0, 2);
+  const handleRatingSubmit = async () => {
+    if (newScore === null || !user) return;
+    try {
+      await submitRating(user.id, LAT, LNG, newScore, newTags);
+      setRatingSuccess(true);
+      setShowRateModal(false);
+      setShowScorePopup(false);
+      
+      fetchAreaDetails();
+      
+      setTimeout(() => {
+        setRatingSuccess(false);
+        setNewScore(null);
+        setNewTags([]);
+      }, 2000);
+    } catch (err: any) {
+      alert(err.message || "Failed to submit rating");
+    }
   };
 
-  const topTags = getTopTags();
-
-  const handleRatingSubmit = () => {
-    if (newScore === null) return;
-    const newRating: SafetyRating = {
-      score: newScore,
-      tags: newTags,
-    };
-    const updatedRatings = [...ratings, newRating];
-    setRatings(updatedRatings);
+  const handleReportSubmit = async () => {
+    if (!user) return;
     try {
-      localStorage.setItem("trustnet_safety_ratings", JSON.stringify(updatedRatings));
-    } catch {
-      // fallback
+      await submitReport(user.id, LAT, LNG, reportType, "Downtown Transit Hub", reportNote);
+      setReportSuccess(true);
+      setShowSubmitReportModal(false);
+      
+      fetchAreaDetails();
+      
+      setTimeout(() => {
+        setReportSuccess(false);
+        setReportType("other");
+        setReportNote("");
+      }, 2000);
+    } catch (err: any) {
+      alert(err.message || "Failed to submit report");
     }
+  };
 
-    setRatingSuccess(true);
-    setShowRateModal(false);
-    setShowScorePopup(false);
-
-    setTimeout(() => {
-      setRatingSuccess(false);
-      setNewScore(null);
-      setNewTags([]);
-    }, 2000);
+  const fetchAreaDetails = async () => {
+    try {
+      const scoreData = await getAreaScore(LAT, LNG);
+      if (scoreData) {
+        setAvgScore(scoreData.score);
+        setRatingCount(scoreData.ratingCount);
+        setTopTags(scoreData.topTags);
+      }
+      const nearbyReports = await getNearbyReports(LAT, LNG, 1000);
+      setReports(nearbyReports);
+    } catch (err) {
+      console.error("Failed to fetch area details", err);
+    }
   };
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("trustnet_reports");
-      if (raw) {
-        setReports(JSON.parse(raw));
-      }
-    } catch {
-      // fallback
-    }
-
-    try {
-      const rawRatings = localStorage.getItem("trustnet_safety_ratings");
-      if (rawRatings) {
-        setRatings(JSON.parse(rawRatings));
-      } else {
-        setRatings(SEED_RATINGS);
-        localStorage.setItem("trustnet_safety_ratings", JSON.stringify(SEED_RATINGS));
-      }
-    } catch {
-      setRatings(SEED_RATINGS);
-    }
+    fetchAreaDetails();
   }, []);
 
   // Map coordinates percentage-based simulation positions
@@ -134,10 +164,6 @@ function HeatmapPage() {
     arjun: { top: "65%", left: "30%" },
     default: { top: "42%", left: "62%" }, // Fallback for newly added contacts
   };
-
-  useEffect(() => {
-    setContacts(loadContacts());
-  }, []);
 
   const getPinStyle = (id: string, index: number) => {
     return (
@@ -284,21 +310,44 @@ function HeatmapPage() {
       <main className="flex-grow relative w-full md:ml-72 h-[calc(100vh-4rem)] md:h-screen bg-gray-200 overflow-hidden flex flex-col">
         {/* Map Background */}
         <div
-          className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing"
+          className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing z-0"
           onClick={() => setSelectedContact(null)}
         >
-          <img
-            alt="City Map"
-            className={`w-full h-full object-cover transition-filter duration-500 ${
-              isNightMode
-                ? "brightness-[0.4] contrast-[1.2] invert-[0.05] hue-rotate-[180deg]"
-                : "opacity-75 grayscale-[0.25]"
-            }`}
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuAiV7v2c_Oz5S5jyhwVy1_LmacUsZXlDGfisrMjBuG675QUy7Zqwl3_XF1QJZY0qjuaUSvA6hCljF1YlK8lR0Se1Fdhy4v_Au3ftYsUShIH3rZGJ8BNPrZdJvlYTI7M9gLen61Z5Xzn4ceKbn0kKtJrw28gcEFRNzr5N8I0gdLhc-3W3doVjLNJJssDjJE6iCnYwLFA0fmiiDN9K60mzoUESugw7rj0ezSRjGGQsU6lC6eZV1guLjqTGdkT_9b7glYCoQG8DBcqp4Sv"
-          />
-        </div>
+          <MapContainer 
+            center={[LAT, LNG]} 
+            zoom={15} 
+            zoomControl={false}
+            style={{ height: "100%", width: "100%" }}
+            className={`transition-filter duration-500 ${isNightMode ? 'brightness-75 contrast-125 hue-rotate-180 invert' : ''}`}
+          >
+            <MapResizer />
+            <TileLayer
+              attribution='&copy; OpenStreetMap'
+              url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+            />
+            {/* Reports Markers */}
+            {reports.map((rep) => {
+              return (
+                <Marker
+                  key={rep.id}
+                  position={[rep.latitude, rep.longitude]}
+                >
+                  <Popup>
+                    <div className="text-xs font-bold">{TYPES.find((t) => t.id === rep.type)?.label || rep.type}</div>
+                    {rep.note && <div className="text-[10px] text-gray-500">{rep.note}</div>}
+                  </Popup>
+                </Marker>
+              );
+            })}
 
-        {/* Heatmap Overlay (simulated via gradient overlay) */}
+            {/* Directions Renderer */}
+            {routePolyline && (
+              <Polyline positions={routePolyline} color="#0d631b" weight={5} opacity={0.8} />
+            )}
+          </MapContainer>
+        </div>
+            
+            {/* Heatmap Overlay (simulated via gradient overlay) */}
         <div
           className={`absolute inset-0 pointer-events-none z-10 mix-blend-multiply transition-opacity duration-300 ${
             isNightMode ? "bg-indigo-950/20" : "bg-transparent"
@@ -532,25 +581,28 @@ function HeatmapPage() {
                     0.2 km away
                   </p>
                 </div>
-                <div className="bg-red-50 text-red-600 px-3 py-1 rounded-xl font-bold text-xs flex items-center gap-1 shadow-sm">
+                <div className={`px-3 py-1 rounded-xl font-bold text-xs flex items-center gap-1 shadow-sm ${
+                  avgScore >= 7 ? "bg-green-50 text-green-700" :
+                  avgScore >= 4 ? "bg-amber-50 text-amber-600" :
+                  avgScore > 0 ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-500"
+                }`}>
                   <span
                     className="material-symbols-outlined text-xs"
                     style={{ fontVariationSettings: "'FILL' 1" }}
                   >
                     warning
                   </span>
-                  4.2
+                  {avgScore > 0 ? avgScore.toFixed(1) : "N/A"}
                 </div>
               </div>
 
               {/* Crowd Reports Chips */}
               <div className="flex flex-wrap gap-1.5 my-1">
-                <div className="bg-gray-100 px-2.5 py-1 rounded-full text-[10px] text-gray-600 font-semibold flex items-center gap-1">
-                  <span className="material-symbols-outlined text-xs">lightbulb</span> Poor Lighting
-                </div>
-                <div className="bg-gray-100 px-2.5 py-1 rounded-full text-[10px] text-gray-600 font-semibold flex items-center gap-1">
-                  <span className="material-symbols-outlined text-xs">groups</span> Crowded
-                </div>
+                {topTags.map(tag => (
+                  <div key={tag} className="bg-gray-100 px-2.5 py-1 rounded-full text-[10px] text-gray-600 font-semibold flex items-center gap-1">
+                    <span className="material-symbols-outlined text-xs">info</span> {tag === "Welllit" ? "Well-lit" : tag}
+                  </div>
+                ))}
                 {reports.slice(0, 2).map((rep) => {
                   const typeItem = TYPES.find((t) => t.id === rep.type) || {
                     icon: "report",
@@ -571,26 +623,50 @@ function HeatmapPage() {
                     </div>
                   );
                 })}
-                <button
-                  onClick={() => setShowReportsModal(true)}
-                  className="text-[10px] text-[#0d631b] hover:text-[#0a5215] font-semibold self-center ml-1 underline cursor-pointer"
-                >
-                  View {2 + reports.length} reports
-                </button>
+                {reports.length > 2 && (
+                  <button
+                    onClick={() => setShowReportsModal(true)}
+                    className="text-[10px] text-[#0d631b] hover:text-[#0a5215] font-semibold self-center ml-1 underline cursor-pointer"
+                  >
+                    View {reports.length} reports
+                  </button>
+                )}
+                {reports.length <= 2 && reports.length > 0 && (
+                  <button
+                    onClick={() => setShowReportsModal(true)}
+                    className="text-[10px] text-[#0d631b] hover:text-[#0a5215] font-semibold self-center ml-1 underline cursor-pointer"
+                  >
+                    View details
+                  </button>
+                )}
               </div>
 
-              <div className="flex gap-2.5">
+              <div className="flex gap-2.5 mt-2">
                 <button
-                  id="rate-area-panel-btn"
                   onClick={() => setShowRateModal(true)}
-                  className="flex-1 border border-[#0d631b] hover:bg-green-50 text-[#0d631b] font-bold text-xs py-3 rounded-xl transition flex justify-center items-center gap-1.5 shadow-sm"
+                  className="flex-1 border border-[#0d631b] hover:bg-green-50 text-[#0d631b] font-bold text-[10px] py-2 rounded-xl transition flex justify-center items-center gap-1 shadow-sm"
                 >
-                  <span className="material-symbols-outlined text-sm">star</span>
-                  Rate this area
+                  <span className="material-symbols-outlined text-xs">star</span>
+                  Rate
                 </button>
-                <button className="flex-1 bg-[#0d631b] hover:bg-[#0a5215] text-white font-bold text-xs py-3 rounded-xl transition flex justify-center items-center gap-1.5 shadow-sm">
-                  <span className="material-symbols-outlined text-sm">directions_walk</span>
-                  Find Safest Route
+                <button 
+                  onClick={() => setShowSubmitReportModal(true)}
+                  className="flex-1 border border-red-600 hover:bg-red-50 text-red-600 font-bold text-[10px] py-2 rounded-xl transition flex justify-center items-center gap-1 shadow-sm"
+                >
+                  <span className="material-symbols-outlined text-xs">report</span>
+                  Report
+                </button>
+                <button 
+                  onClick={calculateRoute}
+                  disabled={isRouting}
+                  className="flex-1 bg-[#0d631b] hover:bg-[#0a5215] text-white font-bold text-[10px] py-2 rounded-xl transition flex justify-center items-center gap-1 shadow-sm disabled:opacity-50"
+                >
+                  {isRouting ? (
+                    <span className="material-symbols-outlined text-xs animate-spin">refresh</span>
+                  ) : (
+                    <span className="material-symbols-outlined text-xs">directions_walk</span>
+                  )}
+                  {isRouting ? "Routing..." : "Route"}
                 </button>
               </div>
             </div>
@@ -660,7 +736,8 @@ function HeatmapPage() {
                     icon: "report",
                     label: rep.type,
                   };
-                  const fmtTime = new Date(rep.at).toLocaleTimeString([], {
+                  const date = rep.timestamp ? rep.timestamp.toDate() : new Date();
+                  const fmtTime = date.toLocaleTimeString([], {
                     hour: "2-digit",
                     minute: "2-digit",
                   });
@@ -725,7 +802,7 @@ function HeatmapPage() {
                 <span className="text-xl">{avgScore > 0 ? avgScore.toFixed(1) : "N/A"}</span>
                 <span className="text-[8px] uppercase tracking-wider -mt-0.5">Score</span>
               </div>
-              <p className="text-xs text-gray-500 font-medium">Based on {ratings.length} ratings</p>
+              <p className="text-xs text-gray-500 font-medium">Based on {ratingCount} ratings</p>
             </div>
 
             {topTags.length > 0 ? (
@@ -866,6 +943,76 @@ function HeatmapPage() {
         </div>
       )}
 
+      {/* Submit Report Modal */}
+      {showSubmitReportModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in"
+          onClick={() => setShowSubmitReportModal(false)}
+        >
+          <div
+            className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 flex flex-col gap-4 animate-scale-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-red-600">report</span>
+                <h3 className="font-extrabold text-base text-gray-900">Report Incident</h3>
+              </div>
+              <button
+                onClick={() => setShowSubmitReportModal(false)}
+                className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded-full transition"
+              >
+                <span className="material-symbols-outlined text-base">close</span>
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                Select Incident Type
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {TYPES.map((t) => {
+                  const isSelected = reportType === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => setReportType(t.id)}
+                      className={`h-10 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 ${
+                        isSelected
+                          ? "bg-red-50 text-red-700 border-red-200 border-2"
+                          : "bg-gray-50 hover:bg-gray-100 text-gray-700 border border-gray-200"
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-sm">{t.icon}</span>
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 mt-1">
+              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                Additional Details (Optional)
+              </label>
+              <textarea
+                value={reportNote}
+                onChange={(e) => setReportNote(e.target.value)}
+                placeholder="Describe what happened or what you saw..."
+                className="w-full h-24 p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500/50 resize-none"
+              />
+            </div>
+
+            <button
+              onClick={handleReportSubmit}
+              className="w-full py-4 rounded-xl font-black text-sm text-white transition active:scale-[0.98] mt-2 shadow bg-red-600 hover:bg-red-700"
+            >
+              Submit Report
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Submission Success Confirmation Screen overlay */}
       {ratingSuccess && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
@@ -877,6 +1024,22 @@ function HeatmapPage() {
               <h3 className="font-extrabold text-base text-gray-900">Rating Submitted</h3>
               <p className="text-xs text-gray-500 leading-normal mt-1">
                 Your rating helps keep your community safe.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reportSuccess && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xs p-6 flex flex-col items-center gap-3.5 text-center border-2 border-red-400 animate-scale-in">
+            <div className="w-14 h-14 rounded-full bg-red-50 text-red-600 flex items-center justify-center shadow-inner animate-pulse">
+              <span className="material-symbols-outlined text-3xl font-black">check_circle</span>
+            </div>
+            <div>
+              <h3 className="font-extrabold text-base text-gray-900">Report Submitted</h3>
+              <p className="text-xs text-gray-500 leading-normal mt-1">
+                Your report helps keep your community safe.
               </p>
             </div>
           </div>

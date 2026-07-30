@@ -36,11 +36,12 @@ function GuardianPage() {
   const [profile, setProfile] = useState<GuardianProfile>(DEFAULT_PROFILE);
   const [agreed, setAgreed] = useState(false);
   const [registering, setRegistering] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // ── Incoming SOS alert state ─────────────────────────────────────────────
   const [incomingAlert, setIncomingAlert] = useState<any | null>(null);
   const [alertDistance, setAlertDistance] = useState<number | null>(null);
-  const [alertCountdown, setAlertCountdown] = useState(60);
+  const [alertCountdown, setAlertCountdown] = useState(30);
   const [myLoc, setMyLoc] = useState<{ lat: number; lng: number } | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const alertDismissed = useRef(false);
@@ -56,7 +57,7 @@ function GuardianPage() {
 
   // ── Grab GA's own GPS location once ──────────────────────────────────────
   useEffect(() => {
-    if (!navigator.geolocation) return;
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
       (pos) => setMyLoc({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
       () => {/* silently ignore */},
@@ -80,14 +81,14 @@ function GuardianPage() {
           : null;
         setIncomingAlert(nearby);
         setAlertDistance(dist);
-        setAlertCountdown(60);
+        setAlertCountdown(30);
         alertDismissed.current = false;
       }
     });
     return () => unsub();
   }, [profile.registered, profile.available, myLoc, incomingAlert]);
 
-  // ── 60-second countdown while alert is showing ───────────────────────────
+  // ── 30-second countdown while alert is showing ───────────────────────────
   useEffect(() => {
     if (!incomingAlert) return;
     if (countdownRef.current) clearInterval(countdownRef.current);
@@ -164,13 +165,19 @@ function GuardianPage() {
   const handleRegister = async () => {
     if (!agreed) return;
     setRegistering(true);
+    setErrorMsg(null);
     try {
       const uid = getUid();
       const name = getName();
       await registerAsGuardianAngel(uid, name);
       saveProfile({ ...profile, registered: true, available: true });
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error registering as Guardian Angel:", err);
+      if (err.code === "permission-denied") {
+        setErrorMsg("Permission Denied: You must be logged in via Firebase (not local fallback) to become a Guardian Angel.");
+      } else {
+        setErrorMsg(err.message || "Failed to register. Please try again.");
+      }
     }
     setRegistering(false);
   };
@@ -219,7 +226,7 @@ function GuardianPage() {
               </p>
             </div>
 
-            {/* 60-second SVG countdown ring */}
+            {/* 30-second SVG countdown ring */}
             <div className="flex flex-col items-center gap-1 px-6">
               <div className="relative w-20 h-20">
                 {(() => {
@@ -230,24 +237,24 @@ function GuardianPage() {
                       <circle cx="40" cy="40" r={r} stroke="#f3f4f6" strokeWidth="7" fill="none" />
                       <circle
                         cx="40" cy="40" r={r}
-                        stroke={alertCountdown > 20 ? "#f59e0b" : "#ef4444"}
+                        stroke={alertCountdown > 10 ? "#f59e0b" : "#ef4444"}
                         strokeWidth="7" fill="none"
                         strokeLinecap="round"
                         strokeDasharray={c}
-                        strokeDashoffset={c * (1 - alertCountdown / 60)}
+                        strokeDashoffset={c * (1 - alertCountdown / 30)}
                         className="transition-all duration-1000 ease-linear"
                       />
                     </svg>
                   );
                 })()}
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className={`text-lg font-black leading-none ${alertCountdown <= 20 ? "text-red-600" : "text-amber-600"}`}>
+                  <span className={`text-lg font-black leading-none ${alertCountdown <= 10 ? "text-red-600" : "text-amber-600"}`}>
                     {alertCountdown}
                   </span>
                   <span className="text-[8px] text-gray-400 font-bold uppercase">secs</span>
                 </div>
               </div>
-              <p className="text-[10px] text-gray-400 font-semibold">Respond within 60 seconds</p>
+              <p className="text-[10px] text-gray-400 font-semibold">Respond within 30 seconds</p>
             </div>
 
             {/* Action buttons */}
@@ -402,6 +409,12 @@ function GuardianPage() {
                 when I am available.
               </span>
             </label>
+
+            {errorMsg && (
+              <div className="bg-red-50 text-red-600 p-4 rounded-xl text-sm font-medium">
+                {errorMsg}
+              </div>
+            )}
 
             {/* Register button */}
             <button

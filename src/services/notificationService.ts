@@ -6,8 +6,10 @@ import {
   getDocs,
   query,
   serverTimestamp,
+  updateDoc,
   where,
 } from "firebase/firestore";
+// removed firebase/messaging import
 
 import { db } from "../firebase/firebase";
 import { getMutualConnection } from "./trustService";
@@ -70,6 +72,23 @@ export async function showBrowserNotification(title: string, options: Notificati
 // Backward compatibility export for guardianService and frontend UI
 export async function sendSOSNotification(sender: string, receiver: string) {
   await sendNotification(receiver, sender, "SOS Alert", `${sender} has triggered an SOS`, "SOS");
+}
+
+export async function requestFCMToken(uid: string) {
+  if (typeof window === "undefined" || !("Notification" in window)) return;
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      const { getMessaging, getToken } = await import("firebase/messaging");
+      const messaging = getMessaging();
+      const token = await getToken(messaging, { vapidKey: "YOUR_PUBLIC_VAPID_KEY_HERE" });
+      if (token) {
+        await updateDoc(doc(db, "users", uid), { fcmToken: token });
+      }
+    }
+  } catch (error) {
+    console.error("Error getting FCM token:", error);
+  }
 }
 
 // =======================================
@@ -164,21 +183,27 @@ export async function notifyGuardian(sessionId: string, guardian: { uid: string;
 
 export async function notifyResponders(sessionId: string) {
   try {
-    const responders = await getDocs(collection(db, "sos_sessions", sessionId, "responders"));
-
     const sos = await getDoc(doc(db, "sos_sessions", sessionId));
-
     if (!sos.exists()) return;
 
-    const owner = sos.data().triggeredBy;
+    const data = sos.data();
+    const owner = data.triggeredBy;
+    const layer1Alerted = data.layer1Alerted || [];
+    const layer2Alerted = data.layer2Alerted || [];
+
+    const respondersSnap = await getDocs(collection(db, "sos_sessions", sessionId, "responders"));
+    const responders = respondersSnap.docs.map(doc => doc.id);
+
+    // Combine all unique users who might have an active SOS notification
+    const allToNotify = Array.from(new Set([...layer1Alerted, ...layer2Alerted, ...responders]));
 
     await Promise.all(
-      responders.docs.map((r) =>
+      allToNotify.map((uid) =>
         sendNotification(
-          r.id,
+          uid,
           owner,
-          "SOS ended",
-          "The person marked themselves safe. Thank you for responding.",
+          "SOS Resolved",
+          "The person marked themselves safe. Thank you for your support.",
           "END_SOS",
           {
             sessionId,

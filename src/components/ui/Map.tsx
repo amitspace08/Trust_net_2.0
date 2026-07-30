@@ -5,12 +5,12 @@ import { findGuardianAngels } from "../../services/guardianService";
 import { getSafeSpacesWithinRadius } from "../../services/safeSpaceService";
 import { getAreaScore, submitRating } from "../../services/safetyRatingService";
 import { getDistance } from "../../services/guardianService";
-import { useEffect, useRef, useState } from "react";
-import { GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
+import React, { useEffect, useRef, useState } from "react";
+import { GoogleMap, Marker, InfoWindow, Circle, useJsApiLoader } from "@react-google-maps/api";
 import { subscribeToNotifications } from "../../services/notificationListener";
 import { markNotificationRead } from "../../services/readNotification";
 import { useAuth } from "../../lib/auth";
-import { getLayer1Contacts } from "../../services/trustService";
+import { getLayer1Contacts, getLayer2Candidates } from "../../services/trustService";
 
 // Custom SVG path icons for sharp, native vector pins on Google Maps
 const goldShieldIcon = {
@@ -67,6 +67,24 @@ const sosUserIcon = {
   scale: 0.8,
 };
 
+const locationOffIcon = {
+  path: "M 0,0 C -12,-12 -15,-20 -15,-25 C -15,-33 -8,-40 0,-40 C 8,-40 15,-33 15,-25 C 15,-20 12,-12 0,0 Z",
+  fillColor: "#9CA3AF", // Gray
+  fillOpacity: 1.0,
+  strokeColor: "#FFFFFF",
+  strokeWeight: 1.5,
+  scale: 0.8,
+};
+
+const layer2Icon = {
+  path: "M 0,0 C -12,-12 -15,-20 -15,-25 C -15,-33 -8,-40 0,-40 C 8,-40 15,-33 15,-25 C 15,-20 12,-12 0,0 Z",
+  fillColor: "#0D9488", // Teal
+  fillOpacity: 1.0,
+  strokeColor: "#FFFFFF",
+  strokeWeight: 1.5,
+  scale: 0.8,
+};
+
 export default function Map() {
   const { user } = useAuth();
   const lastLocationWrite = useRef(0);
@@ -97,6 +115,9 @@ export default function Map() {
   // Selected pins details overlay
   const [selectedSpace, setSelectedSpace] = useState<any>(null);
   const [selectedGA, setSelectedGA] = useState<any>(null);
+  const [selectedContact, setSelectedContact] = useState<any>(null);
+  const [layer2Candidates, setLayer2Candidates] = useState<any[]>([]);
+  const [pulseRadius, setPulseRadius] = useState(500);
 
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: "AIzaSyAyqOvmQjDAp7Mwi5CYUUiSNrjqd5kyuEk",
@@ -109,6 +130,21 @@ export default function Map() {
       setGooglePoint(new (window as any).google.maps.Point(0, 5));
     }
   }, [isLoaded]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setPulseRadius((prev) => (prev === 500 ? 530 : 500));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const getRelativeTime = (timestamp: number) => {
+    const diffInSeconds = Math.floor((Date.now() - timestamp) / 1000);
+    if (diffInSeconds < 60) return "just now";
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
+    return `${Math.floor(diffInSeconds / 86400)} days ago`;
+  };
 
   // Live location tracking
   useEffect(() => {
@@ -207,6 +243,24 @@ export default function Map() {
       unsubscribeNotifications();
     };
   }, [user]);
+
+  useEffect(() => {
+    if (!user || sosUsers.length === 0) {
+      setLayer2Candidates([]);
+      return;
+    }
+    const fetchL2 = async () => {
+      let allL2: any[] = [];
+      for (const su of sosUsers) {
+        if (su.layerActive >= 2) {
+          const l2 = await getLayer2Candidates(su.triggeredBy || su.id);
+          allL2 = [...allL2, ...l2];
+        }
+      }
+      setLayer2Candidates(allL2);
+    };
+    fetchL2();
+  }, [user, sosUsers]);
 
   // Fetch Safe Spaces and Guardians dynamically based on Center
   useEffect(() => {
@@ -327,14 +381,14 @@ export default function Map() {
             (u) =>
               u.id !== user?.id &&
               layer1Ids.includes(u.id) &&
-              u.sharingEnabled !== false &&
               typeof u.latitude === "number" &&
               typeof u.longitude === "number",
           )
           .map((u) => {
+            const isSharingOff = u.sharingEnabled === false;
             const lastActive = u.timestamp?.toDate ? u.timestamp.toDate().getTime() : (u.timestamp?.seconds ? u.timestamp.seconds * 1000 : Date.now());
             const isStale = Date.now() - lastActive > 3_600_000;
-            const baseIcon = isStale ? staleContactIcon : activeContactIcon;
+            const baseIcon = isSharingOff ? locationOffIcon : (isStale ? staleContactIcon : activeContactIcon);
             return (
               <Marker
                 key={u.id}
@@ -344,7 +398,7 @@ export default function Map() {
                 }}
                 label={{
                   text: u.name || "Contact",
-                  color: isStale ? "#4b5563" : "#1d4ed8",
+                  color: isSharingOff ? "#6B7280" : (isStale ? "#4b5563" : "#1d4ed8"),
                   fontWeight: "700",
                 }}
                 icon={
@@ -352,9 +406,63 @@ export default function Map() {
                     ? { ...baseIcon, labelOrigin: googlePoint }
                     : baseIcon
                 }
+                onClick={() => {
+                  setSelectedContact({ ...u, isL2: false, isSharingOff });
+                  setSelectedGA(null);
+                  setSelectedSpace(null);
+                }}
               />
             );
           })}
+
+        {/* Layer 2 Candidates (Active SOS only) */}
+        {users
+          .filter(
+            (u) =>
+              layer2Candidates.some((c) => c.uid === u.id) &&
+              typeof u.latitude === "number" &&
+              typeof u.longitude === "number"
+          )
+          .map((u) => (
+            <Marker
+              key={`l2-${u.id}`}
+              position={{ lat: u.latitude, lng: u.longitude }}
+              label={{ text: u.name || "L2 Candidate", color: "#0D9488", fontWeight: "700" }}
+              icon={googlePoint ? { ...layer2Icon, labelOrigin: googlePoint } : layer2Icon}
+              onClick={() => {
+                setSelectedContact({ ...u, isL2: true, isSharingOff: u.sharingEnabled === false });
+                setSelectedGA(null);
+                setSelectedSpace(null);
+              }}
+            />
+          ))}
+
+        {/* Contact InfoWindow */}
+        {selectedContact && (
+          <InfoWindow
+            position={{ lat: selectedContact.latitude, lng: selectedContact.longitude }}
+            onCloseClick={() => setSelectedContact(null)}
+            options={{ pixelOffset: googlePoint ? new (window as any).google.maps.Size(0, -30) : undefined }}
+          >
+            <div className="p-1 min-w-[140px]">
+              <h3 className="font-bold text-gray-900 text-sm">{selectedContact.name}</h3>
+              <p className="text-[11px] text-gray-500 font-semibold mb-1">
+                {selectedContact.isL2 ? "Layer 2 Candidate" : "Layer 1 Contact"}
+              </p>
+              <p className="text-[10px] text-gray-600 mt-1">
+                Distance: {Math.round(getDistance(center.lat, center.lng, selectedContact.latitude, selectedContact.longitude))}m
+              </p>
+              <p className="text-[10px] text-gray-600">
+                Last Update: {getRelativeTime(selectedContact.timestamp?.toDate ? selectedContact.timestamp.toDate().getTime() : (selectedContact.timestamp?.seconds ? selectedContact.timestamp.seconds * 1000 : Date.now()))}
+              </p>
+              {selectedContact.isSharingOff ? (
+                <p className="text-[10px] text-red-600 font-bold mt-1">Location sharing off</p>
+              ) : (
+                <p className="text-[10px] text-green-600 font-bold mt-1">Location sharing on</p>
+              )}
+            </div>
+          </InfoWindow>
+        )}
 
         {/* SOS User Markers */}
         {sosUsers
@@ -378,6 +486,46 @@ export default function Map() {
               }
             />
           ))}
+
+        {/* Coverage Radius Circles for SOS Users */}
+        {sosUsers
+          .filter((su) => typeof su.latitude === "number" && typeof su.longitude === "number")
+          .map((su) => {
+            const responder = su.responderUID ? users.find(u => u.id === su.responderUID) : null;
+            return (
+              <React.Fragment key={`circles-${su.id}`}>
+                {/* Circle around distressed user */}
+                <Circle
+                  center={{ lat: su.latitude, lng: su.longitude }}
+                  radius={pulseRadius}
+                  options={{
+                    strokeColor: su.layerActive >= 3 ? "#f59e0b" : su.layerActive >= 2 ? "#0d9488" : "#8b5cf6",
+                    strokeOpacity: 0.8,
+                    strokeWeight: 2,
+                    fillColor: su.layerActive >= 3 ? "#f59e0b" : su.layerActive >= 2 ? "#0d9488" : "#8b5cf6",
+                    fillOpacity: 0.05,
+                    clickable: false,
+                  }}
+                />
+                
+                {/* Circle around responder if active */}
+                {responder && typeof responder.latitude === "number" && typeof responder.longitude === "number" && (
+                  <Circle
+                    center={{ lat: responder.latitude, lng: responder.longitude }}
+                    radius={pulseRadius}
+                    options={{
+                      strokeColor: su.layerActive >= 3 ? "#f59e0b" : "#0d9488",
+                      strokeOpacity: 0.8,
+                      strokeWeight: 2,
+                      fillColor: su.layerActive >= 3 ? "#f59e0b" : "#0d9488",
+                      fillOpacity: 0.05,
+                      clickable: false,
+                    }}
+                  />
+                )}
+              </React.Fragment>
+            );
+          })}
 
         {/* Safe Spaces Green Building Markers */}
         {safeSpaces.map((space) => (

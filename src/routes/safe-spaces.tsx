@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { registerSafeSpace, getSafeSpacesWithinRadius } from "../services/safeSpaceService";
+import { registerSafeSpace, getSafeSpacesWithinRadius, fetchPlaces } from "../services/safeSpaceService";
 
 export const Route = createFileRoute("/safe-spaces")({
   head: () => ({
@@ -21,58 +21,7 @@ export interface SafeSpace {
   mapPin?: { top: string; left: string }; // % position on mock map
 }
 
-export const MOCK_SAFE_SPACES: SafeSpace[] = [
-  {
-    id: "ss1",
-    name: "Apollo Pharmacy",
-    type: "pharmacy",
-    distance: 140,
-    address: "12 MG Road, Bengaluru",
-    lat: 12.9751,
-    lng: 77.6072,
-    mapPin: { top: "38%", left: "55%" },
-  },
-  {
-    id: "ss2",
-    name: "Decathlon Sports Store",
-    type: "shop",
-    distance: 280,
-    address: "Indiranagar 100ft Rd",
-    lat: 12.9773,
-    lng: 77.6099,
-    mapPin: { top: "28%", left: "70%" },
-  },
-  {
-    id: "ss3",
-    name: "Indiranagar Police Station",
-    type: "police_station",
-    distance: 420,
-    address: "CMH Road, Indiranagar",
-    lat: 12.9782,
-    lng: 77.6119,
-    mapPin: { top: "50%", left: "35%" },
-  },
-  {
-    id: "ss4",
-    name: "HP Petrol Bunk",
-    type: "petrol_station",
-    distance: 580,
-    address: "100 Feet Rd, HAL 2nd Stage",
-    lat: 12.9741,
-    lng: 77.6088,
-    mapPin: { top: "65%", left: "60%" },
-  },
-  {
-    id: "ss5",
-    name: "Bengaluru Metro Indiranagar",
-    type: "public_building",
-    distance: 720,
-    address: "CMH Road Metro Station",
-    lat: 12.9762,
-    lng: 77.6083,
-    mapPin: { top: "22%", left: "45%" },
-  },
-];
+// MOCK_SAFE_SPACES removed.
 
 const TYPE_META: Record<
   SafeSpace["type"],
@@ -122,7 +71,7 @@ function SafeSpacesPage() {
   const [form, setForm] = useState<RegForm>(EMPTY_FORM);
   const [submitted, setSubmitted] = useState(false);
   const [selectedSpace, setSelectedSpace] = useState<SafeSpace | null>(null);
-  const [spaces, setSpaces] = useState<SafeSpace[]>(MOCK_SAFE_SPACES);
+  const [spaces, setSpaces] = useState<SafeSpace[]>([]);
   const [showMapPopup, setShowMapPopup] = useState<SafeSpace | null>(null);
   const [location, setLocation] = useState({ lat: 26.9124, lng: 75.7873 });
 
@@ -140,12 +89,12 @@ function SafeSpacesPage() {
     );
   }, []);
 
-  // Fetch Safe Spaces within 10km dynamically from Firestore
+  // Fetch Safe Spaces dynamically from Google Places API and Firestore
   useEffect(() => {
     const fetchSpaces = async () => {
       try {
-        const list = await getSafeSpacesWithinRadius(location.lat, location.lng, 10);
-        const mappedList: SafeSpace[] = list.map((item: any) => ({
+        const firestoreSpaces = await getSafeSpacesWithinRadius(location.lat, location.lng, 2000);
+        const mappedList: SafeSpace[] = firestoreSpaces.map((item: any) => ({
           id: item.id,
           name: item.name,
           type: item.type,
@@ -153,15 +102,23 @@ function SafeSpacesPage() {
           address: item.address,
           lat: item.latitude,
           lng: item.longitude,
-          // Generate simulated absolute position offsets if mapping on mock maps is needed
+        }));
+        
+        const googlePlaces = await fetchPlaces(location.lat, location.lng);
+        const allSpaces = [...mappedList, ...googlePlaces].sort((a, b) => a.distance - b.distance);
+        
+        // Add random pins for map visualization
+        const finalSpaces = allSpaces.map(space => ({
+          ...space,
           mapPin: {
             top: `${Math.floor(Math.random() * 60) + 20}%`,
             left: `${Math.floor(Math.random() * 60) + 20}%`,
           },
         }));
-        setSpaces(mappedList);
+
+        setSpaces(finalSpaces);
       } catch (err) {
-        console.error("Error loading safe spaces from firestore:", err);
+        console.error("Error loading safe spaces:", err);
       }
     };
     fetchSpaces();
@@ -285,8 +242,7 @@ function SafeSpacesPage() {
                 src="https://lh3.googleusercontent.com/aida-public/AB6AXuA0_mjB-9zilExVl153uNBx4pz2nq5UhlWh2z3yjHQ5ACtL-NUhLTSMc8A-RVmUAX2TCZML22Kmr5RH5PuwhHZLVkmzPKb04sD9Lyk0s_dArLLtDbFqcYYpoQnQpZxtugG6wY_9Qi2aHTrGXCg357ZA1vOLEutYsXdavFXlc7hwZy-dirGRlX3nTp4QMrmG1XTNvEDPwN1B0oHSBH8lA6zGpQ1_JJvG9K0YbPvXNym7n3p7LzTMJG6dm-mhWCmV6-rvtoH6-VQZFSJ0"
                 className="absolute inset-0 w-full h-full object-cover brightness-90"
               />
-              {/* Green Safe Space pins */}
-              {MOCK_SAFE_SPACES.filter((s) => s.mapPin).map((s) => (
+              {spaces.slice(0, 5).filter((s) => s.mapPin).map((s) => (
                 <button
                   key={s.id}
                   onClick={() => setShowMapPopup(s)}

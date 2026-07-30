@@ -4,7 +4,7 @@ import { useAuth } from "../lib/auth";
 import {
   Contact,
   ContactRequest,
-} from "../lib/contacts-db";
+} from "../types/contacts";
 import { db } from "../firebase/firebase";
 import {
   collection,

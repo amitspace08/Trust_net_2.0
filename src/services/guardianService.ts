@@ -81,7 +81,7 @@ export function startGuardianTimeout(sessionId: string, guardianUid: string, ind
     } catch (err) {
       console.error("Guardian Angel timeout error:", err);
     }
-  }, 60_000);
+  }, 30_000);
 
   gaTimers.set(sessionId, timeout);
 }

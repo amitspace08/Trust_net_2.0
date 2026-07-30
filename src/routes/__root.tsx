@@ -463,11 +463,16 @@ function SosHoldOverlay({
 
 const PUBLIC_PATHS = new Set(["/login", "/signup"]);
 
+import { useLiveLocationTracker } from "../hooks/useLiveLocationTracker";
+
 function AuthGate() {
   const { user, ready } = useAuth();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const router = useRouter();
   const [sosActive, setSosActive] = useState(false);
+  
+  // Track location in background if enabled
+  useLiveLocationTracker();
 
   if (!ready) {
     return (

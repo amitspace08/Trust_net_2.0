@@ -135,3 +135,66 @@ export async function getSafeSpacesWithinRadius(
 
   return spaces.sort((a, b) => a.distance - b.distance);
 }
+
+// =======================================
+// Fetch Places from Google Maps API
+// =======================================
+
+export async function fetchPlaces(lat: number, lng: number): Promise<any[]> {
+  if (typeof window === "undefined" || !(window as any).google) {
+    console.warn("Google Maps API not loaded");
+    return [];
+  }
+
+  const location = new (window as any).google.maps.LatLng(lat, lng);
+  const mapDiv = document.createElement("div");
+  const service = new (window as any).google.maps.places.PlacesService(mapDiv);
+
+  const types = ["hospital", "police", "pharmacy"];
+  const results: any[] = [];
+
+  for (const type of types) {
+    const request = {
+      location,
+      radius: 2000, // 2km radius
+      type,
+    };
+
+    try {
+      const places = await new Promise<any[]>((resolve, reject) => {
+        service.nearbySearch(request, (res: any, status: any) => {
+          if (status === (window as any).google.maps.places.PlacesServiceStatus.OK) {
+            resolve(res);
+          } else if (status === (window as any).google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
+            resolve([]);
+          } else {
+            reject(status);
+          }
+        });
+      });
+      results.push(...places);
+    } catch (e) {
+      console.error(`Failed to fetch places of type ${type}:`, e);
+    }
+  }
+
+  return results.map((place: any) => {
+    let placeType = "public_building";
+    if (place.types?.includes("police")) placeType = "police_station";
+    else if (place.types?.includes("hospital") || place.types?.includes("health")) placeType = "pharmacy";
+    else if (place.types?.includes("pharmacy")) placeType = "pharmacy";
+
+    const pLat = place.geometry?.location?.lat() || 0;
+    const pLng = place.geometry?.location?.lng() || 0;
+
+    return {
+      id: place.place_id,
+      name: place.name,
+      type: placeType,
+      distance: Math.round(calculateDistance(lat, lng, pLat, pLng)),
+      address: place.vicinity || place.formatted_address || "Nearby",
+      lat: pLat,
+      lng: pLng,
+    };
+  }).sort((a, b) => a.distance - b.distance);
+}
