@@ -1,0 +1,305 @@
+import { createFileRoute } from '@tanstack/react-router'
+
+
+
+
+const HTML = `
+<!-- Top Banner: SOS Active -->
+<div class="bg-error text-on-error w-full py-4 px-margin-mobile flex items-center justify-center gap-2 sticky top-0 z-50 shadow-md">
+<span class="material-symbols-outlined font-bold" style="font-variation-settings: 'FILL' 1;">warning</span>
+<span class="font-title-md text-title-md uppercase tracking-wider">SOS ACTIVE - Emergency assistance is being notified</span>
+</div>
+<!-- Main Content Canvas -->
+<main class="flex-grow flex flex-col p-margin-mobile md:p-margin-tablet gap-stack-gap max-w-4xl mx-auto w-full mb-24">
+<!-- Countdown & Status Section -->
+<section class="flex flex-col items-center justify-center py-8">
+<div class="w-40 h-40 rounded-full border-8 border-error flex items-center justify-center sos-active-border bg-error-container text-on-error-container relative">
+<span class="font-headline-lg text-headline-lg absolute z-10" id="countdown-timer">5</span>
+<svg class="absolute w-full h-full transform -rotate-90">
+<circle class="text-error opacity-20" cx="50%" cy="50%" fill="none" r="46%" stroke="currentColor" stroke-width="8"></circle>
+<circle class="text-error transition-all duration-1000 ease-linear" cx="50%" cy="50%" fill="none" id="progress-circle" r="46%" stroke="currentColor" stroke-dasharray="100 100" stroke-width="8"></circle>
+</svg>
+</div>
+<p class="font-title-md text-title-md mt-4 text-error">Transmitting location &amp; audio...</p>
+</section>
+<!-- Escalation Timeline & Timer -->
+<section class="bg-surface-container-low p-4 rounded-xl shadow-sm border border-outline-variant">
+<div class="flex justify-between items-center mb-2">
+<h3 class="font-title-md text-title-md text-on-surface">Escalation Protocol</h3>
+<span class="font-label-md text-label-md text-error bg-error-container px-2 py-1 rounded-full flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]">timer</span>
+                    Escalating to Layer 2 in <span id="escalation-timer">72</span>s
+                </span>
+</div>
+<div class="w-full bg-surface-variant rounded-full h-2 mb-4 overflow-hidden">
+<div class="bg-error h-2 rounded-full transition-all duration-1000" style="width: 30%"></div>
+</div>
+<div class="flex justify-between relative mt-2">
+<div class="absolute top-1/2 left-0 w-full h-0.5 bg-surface-variant -z-10 transform -translate-y-1/2"></div>
+<div class="flex flex-col items-center gap-1 bg-surface-container-low px-2">
+<div class="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-on-primary shadow-sm">
+<span class="material-symbols-outlined text-[14px]">check</span>
+</div>
+<span class="font-label-md text-label-md">Layer 1</span>
+</div>
+<div class="flex flex-col items-center gap-1 bg-surface-container-low px-2">
+<div class="w-6 h-6 rounded-full bg-surface-variant flex items-center justify-center text-on-surface-variant border border-outline-variant">
+<span class="font-label-md text-label-md">2</span>
+</div>
+<span class="font-label-md text-label-md text-on-surface-variant">Layer 2</span>
+</div>
+<div class="flex flex-col items-center gap-1 bg-surface-container-low px-2">
+<div class="w-6 h-6 rounded-full bg-surface-variant flex items-center justify-center text-on-surface-variant border border-outline-variant">
+<span class="font-label-md text-label-md">3</span>
+</div>
+<span class="font-label-md text-label-md text-on-surface-variant">Police</span>
+</div>
+</div>
+</section>
+<!-- Live Location Map & Entities (Bento Layout) -->
+<section class="grid grid-cols-1 md:grid-cols-3 gap-component-gap">
+<!-- Map -->
+<div class="md:col-span-2 bg-surface-container-low rounded-xl overflow-hidden shadow-sm h-64 relative border border-outline-variant">
+<img alt="Map View" class="w-full h-full object-cover opacity-80" data-alt="A detailed, modern digital map interface displayed in light mode. The map shows urban streets, parks, and city blocks in soft grays and greens. Bright, high-contrast red and blue glowing markers indicate specific locations like user position, safe spaces, and active responders. The visual style is clean, functional, and authoritative, suitable for an emergency tracking application." data-location="City Map" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCc5fg68OpWf72lAUfE0tDH7yk9rYFKbMyj79SG0VknavzL2u6XozKcTTGrgiBlqtSI330GAhhThg2uh3HVCn09EcagPMNkvsLA1xSzhrW17M0gDS88RkxYEMFHHjeLCEeOA73T4OY6-iuZ85rg81lDb4kUydqvnYIdfY2KbZQ8zoRNubvbGyuifD01nbH65Fq-yYh9vAFmiPtG2XbpURPKyCbzU9DK4DOhvU1HJOkbmTH_TGeUSb2nkl7jlSzb8-9R2pHg35gk0CvS">
+<!-- Map Overlay Elements -->
+<div class="absolute inset-0 p-4 pointer-events-none flex flex-col justify-between">
+<div class="flex gap-2">
+<span class="bg-surface/90 text-on-surface px-2 py-1 rounded-full font-label-md text-label-md flex items-center gap-1 backdrop-blur-sm shadow-sm">
+<div class="w-2 h-2 rounded-full bg-error sos-active-border"></div> Live Tracking
+                        </span>
+</div>
+</div>
+<!-- Mock Markers -->
+<div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center pointer-events-none">
+<div class="w-12 h-12 rounded-full bg-error/20 flex items-center justify-center sos-active-border">
+<div class="w-4 h-4 rounded-full bg-error"></div>
+</div>
+</div>
+<div class="absolute top-1/4 right-1/4 flex flex-col items-center pointer-events-none">
+<span class="material-symbols-outlined text-secondary" style="font-variation-settings: 'FILL' 1;">security</span>
+</div>
+<div class="absolute bottom-1/4 left-1/3 flex flex-col items-center pointer-events-none">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">local_hospital</span>
+</div>
+</div>
+<!-- Contacts & Safe Spaces Stack -->
+<div class="flex flex-col gap-component-gap">
+<!-- Trust Contacts -->
+<div class="bg-surface-container-low p-4 rounded-xl shadow-sm border border-outline-variant flex-grow">
+<h3 class="font-title-md text-title-md text-on-surface mb-3 flex items-center gap-2">
+<span class="material-symbols-outlined">group</span> Notified Contacts
+                    </h3>
+<ul class="flex flex-col gap-3">
+<li class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center font-title-md text-title-md">M</div>
+<div>
+<p class="font-label-lg text-label-lg text-on-surface">Mom</p>
+<p class="font-label-md text-label-md text-primary flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">done_all</span> Alert Sent</p>
+</div>
+</div>
+</li>
+<li class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-tertiary-container text-on-tertiary-container flex items-center justify-center font-title-md text-title-md">R</div>
+<div>
+<p class="font-label-lg text-label-lg text-on-surface">Riya</p>
+<p class="font-label-md text-label-md text-primary flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">done_all</span> Alert Sent</p>
+</div>
+</div>
+</li>
+<li class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-surface-variant text-on-surface-variant flex items-center justify-center font-title-md text-title-md">A</div>
+<div>
+<p class="font-label-lg text-label-lg text-on-surface">Arjun</p>
+<p class="font-label-md text-label-md text-on-surface-variant flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">schedule</span> Sending...</p>
+</div>
+</div>
+</li>
+</ul>
+</div>
+</div>
+</section>
+<!-- Assistance Resources Grid -->
+<section class="grid grid-cols-1 sm:grid-cols-2 gap-component-gap">
+<!-- Guardian Angel Card -->
+<div class="bg-surface-container-low p-4 rounded-xl shadow-sm border border-outline-variant flex items-start gap-4">
+<div class="relative">
+<img alt="Guardian" class="w-14 h-14 rounded-full object-cover border-2 border-secondary" data-alt="A professional headshot of a dependable-looking individual in their late 30s, set against a neutral light background. The lighting is bright and clear, conveying trust and reliability. They wear casual but neat clothing. The image serves as an avatar profile picture within a modern, light-mode user interface." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAKs3nXkeBrurXiYRxycjdCog2jSPEV8MzLmCfYqDri_InNoqVC-JPAT4V6JWRBShVW2RWoVeRL5qDqCy07b6FLJzmEqAXzBueIzSc9-xRMYRBLP6QBkVwGeDjetZCyDEbl26wY5vYclIHgTJHGZ1Dn4iuQcnk0JGGlSTM4Cu7S7of50FHiH6OCeCdyDCzi4_Cb44ARpALN5m9d45d72m7DIWf3-px648wTx6KdG-DySr0zoZHwriZpqKUULEL9ADwiJ0ODUJJuIdvZ">
+<div class="absolute -bottom-1 -right-1 bg-secondary text-on-secondary rounded-full w-5 h-5 flex items-center justify-center border-2 border-surface-container-low">
+<span class="material-symbols-outlined text-[12px]">verified</span>
+</div>
+</div>
+<div>
+<h4 class="font-title-md text-title-md text-on-surface flex items-center gap-1">Rakesh Kumar</h4>
+<p class="font-body-md text-body-md text-on-surface-variant">Guardian Angel</p>
+<div class="mt-2 flex items-center gap-2">
+<span class="font-label-md text-label-md bg-secondary-container text-on-secondary-container px-2 py-0.5 rounded-sm">Verified</span>
+<span class="font-label-md text-label-md text-on-surface-variant flex items-center"><span class="material-symbols-outlined text-[14px] mr-1">directions_run</span> 450m</span>
+</div>
+</div>
+</div>
+<!-- Nearest Safe Space Card -->
+<div class="bg-surface-container-low p-4 rounded-xl shadow-sm border border-outline-variant flex items-start gap-4">
+<div class="w-14 h-14 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined text-[28px]" style="font-variation-settings: 'FILL' 1;">local_hospital</span>
+</div>
+<div>
+<h4 class="font-title-md text-title-md text-on-surface">City Hospital</h4>
+<p class="font-body-md text-body-md text-on-surface-variant">Designated Safe Space</p>
+<div class="mt-2 flex items-center gap-2">
+<span class="font-label-md text-label-md bg-primary/10 text-primary px-2 py-0.5 rounded-sm border border-primary/20">Open 24/7</span>
+<span class="font-label-md text-label-md text-on-surface-variant flex items-center"><span class="material-symbols-outlined text-[14px] mr-1">location_on</span> 210m away</span>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Bottom Cancel Button (Fixed) -->
+<div class="fixed bottom-0 left-0 w-full p-margin-mobile bg-gradient-to-t from-surface via-surface to-transparent pt-12 z-40 pb-safe flex justify-center">
+<button
+  id="cancelSOS"
+  class="w-full max-w-md bg-surface-container-highest hover:bg-surface-variant text-on-surface font-title-lg text-title-lg py-4 rounded-full shadow-lg border-2 border-outline-variant transition-all active:scale-95 flex items-center justify-center gap-2 uppercase tracking-wide"
+>
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">cancel</span>
+            I AM SAFE — CANCEL SOS
+        </button>
+</div>
+
+`;
+
+export const Route = createFileRoute("/sos")({
+  head: () => ({
+    meta: [
+      {
+        title: "TrustNet - SOS Active",
+      },
+    ],
+  }),
+  component: Page,
+});
+
+import { useEffect } from "react";
+import { triggerSOS, cancelSOS } from "../services/sosService";
+
+function Page() {
+  useEffect(() => {
+    // Create SOS Session
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        await triggerSOS(
+          "amit123",
+          position.coords.latitude,
+          position.coords.longitude
+        );
+
+        console.log("SOS Session Created");
+      },
+      (error) => {
+        console.log(error);
+      }
+    );
+
+    // Countdown
+    let count = 5;
+    const timerEl = document.getElementById("countdown-timer");
+    const progressCircle =
+      document.getElementById("progress-circle");
+
+    const circumference = 2 * Math.PI * 73.6;
+
+    if (progressCircle) {
+      progressCircle.setAttribute(
+        "stroke-dasharray",
+        `${circumference}`
+      );
+      progressCircle.setAttribute(
+        "stroke-dashoffset",
+        "0"
+      );
+    }
+
+    const interval = setInterval(() => {
+      count--;
+
+      if (count >= 0) {
+        if (timerEl)
+          timerEl.textContent = `${count}`;
+
+        if (progressCircle) {
+          const offset =
+            circumference * (1 - count / 5);
+
+          progressCircle.setAttribute(
+            "stroke-dashoffset",
+            `${offset}`
+          );
+        }
+      }
+
+      if (count === 0) {
+        if (timerEl)
+          timerEl.textContent = "SOS";
+
+        clearInterval(interval);
+      }
+    }, 1000);
+
+    // Escalation Timer
+    let escCount = 72;
+
+    const escTimer =
+      document.getElementById(
+        "escalation-timer"
+      );
+
+    const escInterval = setInterval(() => {
+      escCount--;
+
+      if (escTimer)
+        escTimer.textContent =
+          escCount.toString();
+
+      if (escCount <= 0) {
+        clearInterval(escInterval);
+      }
+    }, 1000);
+
+    // Cancel Button
+    const btn =
+      document.getElementById(
+        "cancelSOS"
+      );
+
+    const handleCancel = async () => {
+      await cancelSOS("amit123");
+
+      console.log("SOS Cancelled");
+
+      window.location.href = "/";
+    };
+
+    btn?.addEventListener(
+      "click",
+      handleCancel
+    );
+
+    return () => {
+      clearInterval(interval);
+      clearInterval(escInterval);
+
+      btn?.removeEventListener(
+        "click",
+        handleCancel
+      );
+    };
+  }, []);
+
+  return (
+    <HtmlPage
+      html={HTML}
+      className="bg-surface text-on-surface font-body-md min-h-screen flex flex-col antialiased overflow-x-hidden pb-20 md:pb-0"
+    />
+  );
+}

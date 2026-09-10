@@ -1,142 +1,77 @@
-# TrustNet — Personal Safety Network
+# TrustNet - Advanced Personal Safety & SOS Platform
 
-TrustNet is a modern, responsive, and privacy-first personal safety web application. It implements a multi-layered peer-to-peer safety network, community safe spaces, and dynamic crowdsourced area safety ratings designed to protect individuals in high-risk scenarios and daily commutes.
+> **Live Demo:** [https://trustnet-app.vercel.app](https://trustnet-app.vercel.app) *(Replace with actual deployed URL)*
 
-## Browser delivery limitations
+TrustNet is a professional, scalable, full-stack personal safety application built with the MERN stack and Socket.io. It features a sophisticated three-layer SOS escalation system designed to guarantee a response when emergencies happen.
 
-TrustNet is a web application. While it uses `navigator.geolocation` for live tracking while the tab is open, browsers may suspend timers and geolocation when the device is locked, the tab is backgrounded, or battery-saving is enabled. Native Expo background-location requirements therefore cannot be guaranteed in this codebase. SOS location writes should be treated as foreground/PWA best effort.
+## Core Features
 
-Firestore notification documents and the Web Notifications API are implemented as an in-app/foreground fallback. Reliable delivery while the browser is closed requires configuring Firebase Cloud Messaging web push, a service worker, and a VAPID key in the Firebase console.
+- **Layer 1: Trust Circle (Direct Contacts)**
+  - Users add close friends and family to their Trust Circle.
+  - When an SOS is triggered, these users are notified immediately with a live GPS tracking link.
+- **Layer 2: Social Graph Escalation (Friends of Friends)**
+  - If Layer 1 fails to respond within 45 seconds, the system traverses the user's social graph to find nearby "friends of friends".
+  - Privacy First: Location data is fuzzed (approximate distance/direction) until a Layer 2 candidate actively accepts the SOS request.
+  - Declined candidates are permanently removed from the active session pool.
+- **Layer 3: Guardian Angels (Community Volunteers)**
+  - If Layer 2 fails to respond, the system alerts verified, background-checked community volunteers (Guardian Angels) in the vicinity.
+  - Guardian Angels are pinged sequentially, maintaining privacy and ensuring localized response.
+- **Layer 4: Direct Police Escalation**
+  - Ultimate fallback if no Guardian Angels are available.
+- **Safe Spaces Network**
+  - Integrated map highlighting community-verified Safe Spaces (hospitals, pharmacies, 24/7 stores).
+  - Users receive turn-by-turn directions to the nearest Safe Space when Layer 3 is exhausted.
+- **Real-Time Live Location**
+  - High-frequency GPS pinging powered by Socket.io ensures responders always have the distressed user's exact, live coordinates.
+  - Handles poor connectivity scenarios with graceful "Offline/Stale Location" UI states.
 
----
+## Tech Stack
 
-## 🚀 Key System Features (Frontend Complete)
+### Frontend (Client)
+- **Framework**: React.js + TypeScript + Vite
+- **Routing**: @tanstack/react-router
+- **Styling**: Tailwind CSS, Radix UI
+- **Maps**: react-leaflet, Leaflet.js
+- **Real-time**: socket.io-client
+- **State**: React Context API
 
-### 1. Multi-Layer SOS Escalation Chain
+### Backend (Server)
+- **Framework**: Node.js + Express.js + TypeScript
+- **Database**: MongoDB (via Mongoose)
+- **Real-time**: Socket.IO (with robust room-based broadcast logic)
+- **Validation**: Zod schema validation
+- **Authentication**: JWT (JSON Web Tokens)
 
-- **1.5s Hold SOS Trigger:** Large red centerpiece button requiring a continuous 1.5-second hold to activate. Uses a pulsing ring animation to prevent accidental triggers.
-- **5-Second Countdown Cancel Screen:** A large countdown timer from 5 to 0. Features a stress-optimized, oversized _"Cancel — I am safe"_ button.
-- **Layer 1 Active SOS Screen (Purple):** Alerts designated primary contacts immediately. Displays a live status bar showing _"Location sharing — live"_ with a pulsing green dot.
-- **Layer 2 Social Graph Escalation (Teal):** When 90 seconds pass with no response from Layer 1, the app automatically transitions to Layer 2. Traverses the social graph to locate nearby second-degree contacts (Friends-of-Friends) and alerts them.
-- **Layer 3 Guardian Angel Network (Gold):** Escalates after another 90 seconds. Alerts verified community volunteers who have marked themselves on-duty via the _Guardian Angel Dashboard_.
-- **Police Escalation:** Final step in the timeline for law enforcement dispatch.
-- **Pre-Response Confirmations:** Protects responders against accidental confirmations by displaying mutual connections, distance indicators, and a community helper disclaimer.
-- **Decline & Re-Routing:** Responders can click _"I cannot help right now"_, immediately routing the emergency alert to the next ranked candidate.
+## Architecture Highlights
+- **Idempotent Socket Events**: The SOS escalation engine on the backend is strictly controlled using MongoDB `findOneAndUpdate` atomic operations to prevent race conditions during rapid escalation transitions.
+- **Resilient Connectivity**: Socket auto-reconnection and state refetching ensures users can drop network momentarily and instantly re-sync their session state when they reconnect.
 
-### 2. Community Safe Spaces
+## How to Run Locally
 
-- **Registration Form:** Under 5 fields allowing local businesses/locations (shops, pharmacies, petrol stations, police stations, public buildings) to register as community Safe Spaces.
-- **Interactive Map Pins:** Green building pins on the map show nearby safe spaces. Tapping a pin opens a popup badge detailing distance, address, and walking directions.
-- **SOS Fallback Routing:** During any active SOS, the nearest Safe Space is persistently displayed at the bottom of the screen with a quick-tap navigation button linking directly to Google Maps walking directions.
-
-### 3. Crowdsourced Safety Ratings
-
-- **Floating Score Badge:** A dynamic colored badge in the corner of the map showing the average safety score of the current area:
-  - **Green (Score $\ge$ 7):** Safe Zone.
-  - **Amber (Score 4 to 6):** Caution Recommended.
-  - **Red (Score $\le$ 3):** High Risk.
-- **Score & Tag Details Popup:** Tapping the badge displays the exact score, total ratings, and the top two reported conditions.
-- **20-Second Rate Screen:** Rapid 1-to-10 grid selector with optional tags (_Poor lighting, Isolated, Well-lit, Crowded, Police presence_) and a community helper contribution check.
-- **Auto-Return Success Screen:** Confirms rating submission and automatically navigates back to the map view.
-
----
-
-## 🛠️ Project Structure & File Index
-
-```text
-├── src/
-│   ├── routes/              # TanStack Start Route Files
-│   │   ├── __root.tsx       # Root layout shell & global app layout
-│   │   ├── index.tsx        # Home Page (Long-press SOS activator & quick actions)
-│   │   ├── heatmap.tsx      # Map screen with safety score badges & rating modals
-│   │   ├── circle.tsx       # My Trust Circle (Add, view, accept Layer 1 contacts)
-│   │   ├── safe-spaces.tsx  # Register spaces and search list within 1km
-│   │   ├── guardian.tsx     # GA registration screen, dashboard, and availability toggles
-│   │   ├── sos.tsx          # Distressed user view (3-Layer color banner, maps, 4-node timeline)
-│   │   ├── sos-receiver.tsx # Responding contact view (Distinct headers, fuzzy pins, confirmation modal, decline, thank you screen)
-│   │   ├── history.tsx      # Safety Journey logs and timelines
-│   │   ├── privacy.tsx      # Privacy settings & location sharing controls
-│   │   └── support.tsx      # Helplines (112 / 100) & FAQ section
-│   ├── lib/
-│   │   ├── auth.tsx         # User authentication & mock profiles
-│   │   └── contacts-db.ts   # Social Graph Traversal engine & mock DB
-│   └── styles.css           # Custom styling classes
-```
-
----
-
-## 🏃 Getting Started
-
-### Prerequisites
-
-You need [Node.js](https://nodejs.org/) (v18+) and `npm` installed.
-
-### Installation
-
-1. Navigate to the project root directory:
+1. **Clone the repository.**
+2. **Setup Environment Variables:**
+   - Create `server/.env`:
+     ```env
+     PORT=5000
+     MONGODB_URI=mongodb://localhost:27017/trustnet
+     JWT_SECRET=your_super_secret_jwt_key
+     ```
+   - Create `client/.env`:
+     ```env
+     VITE_API_URL=http://localhost:5000/api
+     ```
+3. **Start the Backend:**
    ```bash
-   cd TrustNet
-   ```
-2. Install npm dependencies:
-   ```bash
+   cd server
    npm install
+   npm run dev
+   ```
+4. **Start the Frontend:**
+   ```bash
+   cd client
+   npm install
+   npm run dev
    ```
 
-### Running the App
-
-#### 1. Development Mode
-
-Start the local development server:
-
-```bash
-npm run dev
-```
-
-Open [http://localhost:5178](http://localhost:5178) in your web browser.
-
-#### 2. Production Compile & Build check
-
-Compile the client and SSR build to verify TypeScript and build health:
-
-```bash
-npm run build
-```
-
----
-
-## 🧪 Demonstration & Simulation Steps
-
-### Flow 1: SOS Escalation Chain
-
-1. Open the home page (`/`) and **press and hold the big red SOS button** for 1.5 seconds.
-2. The red 5-second countdown screen will appear. Do not press cancel.
-3. Once the timer reaches 0, the **Layer 1 Active Screen (Purple)** will load with the _"Location sharing — live"_ green status bar.
-4. Click _"Simulate L2 Timeout"_ inside the status card to mimic direct contacts failing to pick up. The app transitions to the calm searching screen and escalates to **Layer 2 (Teal)**.
-5. Click _"Simulate L3 Timeout"_ to mimic no response from L2. The app escalates to **Layer 3 (Gold - Guardian Angels)**.
-6. Open a separate tab/window at `/sos-receiver?role=layer2` or `/sos-receiver?role=layer3` to see the responder alert panel. Click _"I can help"_ $\rightarrow$ _"Confirm & Respond"_ to see the distressed user page update dynamically with the helper's name and route.
-7. Click _"I am safe — end SOS"_ on the sender tab to trigger the double-tap prevention modal, end the emergency cleanly, and trigger the responder's thank-you page.
-
-### Flow 2: Safe Space Registration & Routing
-
-1. Go to the Home Page and click **Safe Spaces** $\rightarrow$ **Register a Space** tab.
-2. Fill out the business name, choose a category, enter the address, check the confirmation, and submit.
-3. Click the **Safe Spaces Nearby** tab to see your new registered business integrated into the sorted 1km proximity list.
-4. Go to `/sos` active screen and look at the bottom: the nearest Safe Space (Apollo Pharmacy) is persistently displayed with a walking route map highlight and a button to launch walking directions.
-
-### Flow 3: Location Safety Rating
-
-1. Navigate to the **Heatmap** page (`/heatmap`).
-2. Observe the floating circular badge in the top-right corner. It displays `7.3` in a **green circle** (since the average score is $\ge$ 7).
-3. Click the badge to open the detail popup displaying the average score, number of ratings, and top conditions (_Well-lit, Police presence_).
-4. Tap _"Rate this Area"_ to open the 1-20s submission panel. Tap a low score (e.g. `2`) and select tags (_Poor lighting, Isolated_), then submit.
-5. The success overlay will slide in confirming the rating, and the average score on the badge will update to represent your submission.
-
----
-
-## 📈 Verification Summary (All Frontend Tasks Complete)
-
-- **Task 1 to 3 (Weeks 4-5):** Completed. Fully functional SOS counts, fuzzy mapping offset (+100m-200m) for semi-strangers, decline state handlers, timeline rendering, and double-tap prevention handlers.
-- **Task 1 (Week 6):** Completed. Fully functional Guardian Angel registration checkboxes, availability ON/OFF dashboards with stats, GA profile matching, L3 alerts, and gold colors.
-- **Task 2 (Week 6):** Completed. Under-5-field Safe Space registry, green building pins, detail walking directions popups, and persistent SOS safe-destination banner.
-- **Task 3 (Week 6):** Completed. Dynamic rating score average, colored circles, 10-score selector grids, tag filters, and success notifications.
-- **Performance & Network:** Leverages lightweight GPU-accelerated CSS animations and robust client caching to guarantee fast updates on 20% battery limits and slow 2G internet.
+## Demo Mode
+To bypass hardware geolocation checks and preview the UI in a simulated environment, append `?demo=true` to any URL (e.g., `http://localhost:5173/?demo=true`).
