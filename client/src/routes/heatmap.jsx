@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../lib/auth";
 
 import { UserAvatar } from "../components/ui/UserAvatar";
@@ -7,10 +7,21 @@ import { UserAvatar } from "../components/ui/UserAvatar";
 import { useLayer1Contacts } from "../hooks/useContacts";
 import { getAreaScore, submitRating } from "../services/safetyRatingService";
 import { getNearbyReports, submitReport } from "../services/reportService";
-import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap, Circle } from "react-leaflet";
+import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 export const Route = createFileRoute("/heatmap")({
+  validateSearch: (search) => {
+    return {
+      targetLat: search.targetLat ? Number(search.targetLat) : undefined,
+      targetLng: search.targetLng ? Number(search.targetLng) : undefined,
+      targetName: search.targetName || undefined,
+      targetAvatar: search.targetAvatar || undefined,
+      targetPhone: search.targetPhone || undefined,
+      targetRelation: search.targetRelation || undefined,
+    };
+  },
   head: () => ({
     meta: [{ title: "TrustNet - Heatmap" }],
   }),
@@ -29,17 +40,58 @@ function MapResizer() {
   return null;
 }
 
+// Fly map to user's real location on first GPS fix
+function FlyTo({ center }) {
+  const map = useMap();
+  useEffect(() => {
+    if (center) map.flyTo(center, 15, { animate: true, duration: 1.2 });
+  }, [center, map]);
+  return null;
+}
+
+// Custom green "You" icon
+const youIcon = L.divIcon({
+  className: "",
+  html: `<div style="width:28px;height:28px;border-radius:50%;background:#0d631b;display:flex;align-items:center;justify-content:center;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.4);color:white;font-size:13px;font-weight:bold">U</div>`,
+  iconSize: [28, 28],
+  iconAnchor: [14, 14],
+});
+
 function HeatmapPage() {
   const { user } = useAuth();
   const avatarUrl = user?.avatar || user?.profile_photo || "";
   const navigate = useNavigate();
+  const search = Route.useSearch();
   const contacts = useLayer1Contacts();
-  const [selectedContact, setSelectedContact] = useState(null);
+  
+  const [selectedContact, setSelectedContact] = useState(() => {
+    if (search.targetLat && search.targetLng) {
+      return {
+        id: "target_external",
+        name: search.targetName || "Target Location",
+        avatar: search.targetAvatar || "",
+        phone: search.targetPhone || "",
+        relation: search.targetRelation || "Distressed User",
+        latitude: search.targetLat,
+        longitude: search.targetLng,
+        shareLocation: true,
+        online: true,
+      };
+    }
+    return null;
+  });
+
   const [isNightMode, setIsNightMode] = useState(false);
 
-  // Hardcoded coordinates for demo (Jaipur)
-  const LAT = 26.9124;
-  const LNG = 75.7873;
+  // Real GPS location
+  const [myLocation, setMyLocation] = useState(null);
+  const [locationError, setLocationError] = useState(false);
+  const [mapCenter, setMapCenter] = useState(null);
+  const [areaName, setAreaName] = useState("Your Current Area");
+
+  // Derived lat/lng (fall back to Delhi if GPS not ready)
+  const LAT = myLocation?.lat ?? 28.6139;
+  const LNG = myLocation?.lng ?? 77.209;
 
   const [reports, setReports] = useState([]);
   const [showReportsModal, setShowReportsModal] = useState(false);
@@ -68,9 +120,18 @@ function HeatmapPage() {
   const calculateRoute = async () => {
     setIsRouting(true);
     try {
-      // Simulate walking route from slightly south-west of the center area
-      const origin = { lat: LAT - 0.005, lng: LNG - 0.005 };
-      const dest = { lat: LAT, lng: LNG };
+      if (!myLocation) {
+        alert("Waiting for GPS location...");
+        setIsRouting(false);
+        return;
+      }
+      if (!selectedContact || !selectedContact.latitude || !selectedContact.longitude) {
+        alert("Please tap on a friend's profile picture pin to select them first.");
+        setIsRouting(false);
+        return;
+      }
+      const origin = myLocation;
+      const dest = { lat: selectedContact.latitude, lng: selectedContact.longitude };
       const res = await fetch(
         `https://router.project-osrm.org/route/v1/foot/${origin.lng},${origin.lat};${dest.lng},${dest.lat}?overview=full&geometries=geojson`,
       );
@@ -93,6 +154,12 @@ function HeatmapPage() {
     }
     setIsRouting(false);
   };
+
+  useEffect(() => {
+    if (search.targetLat && search.targetLng && myLocation && !routePolyline && !isRouting) {
+      calculateRoute();
+    }
+  }, [search.targetLat, search.targetLng, myLocation, routePolyline]);
 
   const TYPES = [
     { id: "suspicious", icon: "visibility", label: "Suspicious activity" },
@@ -161,6 +228,34 @@ function HeatmapPage() {
     fetchAreaDetails();
   }, []);
 
+  // ── Watch real GPS location ──
+  useEffect(() => {
+    if (!navigator.geolocation) { setLocationError(true); return; }
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setMyLocation(coords);
+        setMapCenter((prev) => prev || [coords.lat, coords.lng]);
+      },
+      () => setLocationError(true),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
+    );
+    return () => navigator.geolocation.clearWatch(id);
+  }, []);
+
+  // ── Reverse geocode area name from real GPS ──
+  useEffect(() => {
+    if (!myLocation) return;
+    const { lat, lng } = myLocation;
+    fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`)
+      .then((r) => r.json())
+      .then((data) => {
+        const addr = data.address || {};
+        setAreaName(addr.road || addr.suburb || addr.neighbourhood || addr.city_district || addr.city || "Your Area");
+      })
+      .catch(() => {});
+  }, [myLocation?.lat?.toFixed(3), myLocation?.lng?.toFixed(3)]);
+
   // Map coordinates percentage-based simulation positions
   const PIN_POSITIONS = {
     mom: { top: "32%", left: "45%" },
@@ -181,7 +276,7 @@ function HeatmapPage() {
   return (
     <div className="w-full min-h-screen relative flex flex-col md:flex-row pb-24 md:pb-0 bg-[#faf9fc]">
       {/* Map Content Canvas */}
-      <main className="flex-grow relative w-full md:ml-72 h-[calc(100vh-4rem)] md:h-screen bg-gray-200 overflow-hidden flex flex-col">
+      <main className="flex-grow relative w-full  h-[calc(100vh-4rem)] md:h-screen bg-gray-200 overflow-hidden flex flex-col">
         {/* Map Background */}
         <div
           className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing z-0"
@@ -195,10 +290,58 @@ function HeatmapPage() {
             className={`transition-filter duration-500 ${isNightMode ? "brightness-75 contrast-125 hue-rotate-180 invert" : ""}`}
           >
             <MapResizer />
+            {mapCenter && <FlyTo center={mapCenter} />}
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
+
+            {/* ── YOUR real location ── */}
+            {myLocation && (
+              <>
+                <Marker position={[myLocation.lat, myLocation.lng]} icon={youIcon}>
+                  <Popup>
+                    <div className="font-bold text-xs text-green-700">📍 You are here</div>
+                    <div className="text-[10px] text-gray-500">{areaName}</div>
+                  </Popup>
+                </Marker>
+                <Circle
+                  center={[myLocation.lat, myLocation.lng]}
+                  radius={80}
+                  pathOptions={{ color: "#0d631b", fillColor: "#0d631b", fillOpacity: 0.08, weight: 2 }}
+                />
+              </>
+            )}
+
+            {/* ── Contacts real GPS locations ── */}
+            {[...contacts, ...(selectedContact?.id === "target_external" ? [selectedContact] : [])].map((c) => {
+              if (!c.shareLocation || !c.latitude || !c.longitude) return null;
+              
+              const avatarIcon = L.divIcon({
+                className: "custom-avatar-marker",
+                html: `<div style="width:36px;height:36px;border-radius:50%;overflow:hidden;border:3px solid ${c.id === 'target_external' ? '#ef4444' : '#0d631b'};box-shadow:0 3px 6px rgba(0,0,0,0.4);background:white;display:flex;align-items:center;justify-content:center;font-weight:bold;color:#333;"><img src="${c.avatar || ''}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'" />${!c.avatar ? c.name.charAt(0) : ''}</div>`,
+                iconSize: [36, 36],
+                iconAnchor: [18, 18],
+              });
+
+              return (
+                <Marker
+                  key={c.id}
+                  position={[c.latitude, c.longitude]}
+                  icon={avatarIcon}
+                  eventHandlers={{
+                    click: () => setSelectedContact(c),
+                  }}
+                >
+                  <Popup>
+                    <div className="font-bold text-xs">{c.name}</div>
+                    <div className="text-[10px] text-gray-500">
+                      {c.relation} {c.online ? "· Online" : "· Offline"}
+                    </div>
+                  </Popup>
+                </Marker>
+              );
+            })}
 
             {/* Reports Markers */}
             {reports.map((rep) => {
@@ -213,6 +356,27 @@ function HeatmapPage() {
                 </Marker>
               );
             })}
+
+            {/* ── Incident heat-ring clusters ── */}
+            {(() => {
+              const clusters = [];
+              for (const rep of reports) {
+                let placed = false;
+                for (const cl of clusters) {
+                  const d = Math.sqrt((rep.latitude - cl.lat) ** 2 + (rep.longitude - cl.lng) ** 2);
+                  if (d < 0.002) { cl.count++; placed = true; break; }
+                }
+                if (!placed) clusters.push({ lat: rep.latitude, lng: rep.longitude, count: 1 });
+              }
+              return clusters.map((cl, i) => (
+                <Circle key={i} center={[cl.lat, cl.lng]} radius={80 + cl.count * 40}
+                  pathOptions={{
+                    color: cl.count >= 3 ? "#dc2626" : cl.count >= 2 ? "#f59e0b" : "#fca5a5",
+                    fillColor: cl.count >= 3 ? "#dc2626" : cl.count >= 2 ? "#f59e0b" : "#fca5a5",
+                    fillOpacity: 0.13, weight: 1,
+                  }} />
+              ));
+            })()}
 
             {/* Directions Renderer */}
             {routePolyline && (
@@ -253,7 +417,22 @@ function HeatmapPage() {
               </button>
             </div>
 
-            {/* Floating Safety Score Badge */}
+            <div className="flex flex-col items-end gap-2 pointer-events-auto">
+              {/* GPS Status */}
+              {myLocation && (
+                <div className="bg-white/95 backdrop-blur rounded-full px-3 py-1 shadow border border-gray-200 text-[10px] font-bold text-green-700 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                  Live GPS Active
+                </div>
+              )}
+              {locationError && (
+                <div className="bg-red-50 border border-red-200 rounded-full px-3 py-1 shadow text-[10px] font-bold text-red-700 flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-xs">location_off</span>
+                  GPS Unavailable
+                </div>
+              )}
+
+              {/* Floating Safety Score Badge */}
             <button
               id="safety-score-badge"
               onClick={() => setShowScorePopup(true)}
@@ -272,6 +451,7 @@ function HeatmapPage() {
               </span>
               <span className="text-[7px] uppercase font-bold tracking-wider -mt-0.5">Safety</span>
             </button>
+            </div>
           </div>
 
           {/* Legend */}
@@ -291,55 +471,6 @@ function HeatmapPage() {
           </div>
         </div>
 
-        {/* Dynamic Contact Pins on Map */}
-        {contacts.map((c, index) => {
-          const pos = getPinStyle(c.id, index);
-
-          return (
-            <button
-              key={c.id}
-              onClick={(e) => {
-                e.stopPropagation();
-                setSelectedContact(c);
-              }}
-              style={{ top: pos.top, left: pos.left }}
-              className={`absolute z-20 w-11 h-11 -ml-5.5 -mt-5.5 rounded-full border-2 bg-white shadow-lg flex items-center justify-center transition hover:scale-110 active:scale-95 ${
-                selectedContact?.id === c.id
-                  ? "ring-4 ring-[#0d631b]/30 border-[#0d631b]"
-                  : "border-gray-200"
-              }`}
-              title={`${c.name} (Tap for details)`}
-            >
-              {c.shareLocation ? (
-                // Location Sharing ON: Show user avatar
-                <div className="relative w-full h-full rounded-full overflow-hidden p-0.5">
-                  <UserAvatar
-                    name={c.name}
-                    avatarUrl={c.avatar}
-                    sizeClassName="w-full h-full text-xs font-semibold"
-                  />
-
-                  {/* Status dot indicator (online/offline) on avatar */}
-                  <span
-                    className={`absolute bottom-0.5 right-0.5 w-2.5 h-2.5 rounded-full border border-white ${
-                      c.online ? "bg-green-500" : "bg-gray-400"
-                    }`}
-                  />
-                </div>
-              ) : (
-                // Location Sharing OFF: Show grey location_off icon
-                <div className="w-full h-full rounded-full bg-gray-100 flex items-center justify-center text-gray-400">
-                  <span
-                    className="material-symbols-outlined text-lg"
-                    style={{ fontVariationSettings: "'FILL' 1" }}
-                  >
-                    location_off
-                  </span>
-                </div>
-              )}
-            </button>
-          );
-        })}
 
         {/* Dynamic Bottom Detail Panel (Persistent/Dynamic Sheet) */}
         <div className="absolute bottom-4 left-4 right-4 z-30 bg-white rounded-2xl shadow-xl border border-gray-200 p-5 flex flex-col gap-4 max-w-md mx-auto pointer-events-auto">
@@ -429,32 +560,51 @@ function HeatmapPage() {
                 </div>
               )}
 
-              <div className="flex gap-2.5 mt-1">
+              <div className="flex gap-2 mt-1">
                 <a
                   href={`tel:${selectedContact.phone}`}
-                  className="flex-1 py-2.5 bg-[#0d631b] hover:bg-[#0a5215] text-white text-xs font-semibold rounded-xl transition flex justify-center items-center gap-1.5"
+                  className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-xl transition flex justify-center items-center gap-1.5"
                 >
                   <span className="material-symbols-outlined text-sm">call</span>
-                  Call Contact
+                  Call
                 </a>
                 <button
-                  onClick={() => navigate({ to: "/circle" })}
-                  className="flex-1 py-2.5 border border-gray-300 text-gray-700 text-xs font-semibold rounded-xl hover:bg-gray-50 transition flex justify-center items-center gap-1.5"
+                  onClick={calculateRoute}
+                  disabled={isRouting}
+                  className="flex-1 py-2 bg-[#0d631b] hover:bg-[#0a5215] text-white text-xs font-semibold rounded-xl transition flex justify-center items-center gap-1.5 disabled:opacity-50"
                 >
-                  <span className="material-symbols-outlined text-sm">group</span>
-                  View in Circle
+                  {isRouting ? (
+                    <span className="material-symbols-outlined text-sm animate-spin">refresh</span>
+                  ) : (
+                    <span className="material-symbols-outlined text-sm">directions_walk</span>
+                  )}
+                  {isRouting ? "Routing..." : "Route"}
                 </button>
               </div>
+
+              {/* Show Route Distance and Duration if calculated */}
+              {routePolyline && distance && duration && (
+                <div className="flex items-center justify-between bg-green-50 text-green-800 border border-green-200 rounded-xl px-3 py-2 mt-1">
+                  <div className="flex items-center gap-1.5 font-bold text-xs">
+                    <span className="material-symbols-outlined text-sm">directions_walk</span>
+                    {distance}
+                  </div>
+                  <div className="flex items-center gap-1.5 font-bold text-xs">
+                    <span className="material-symbols-outlined text-sm">schedule</span>
+                    {duration}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             // Default Area Detail screen
             <div className="flex flex-col gap-3">
               <div className="flex justify-between items-start">
                 <div className="flex flex-col">
-                  <h2 className="font-bold text-base text-gray-900">Downtown Transit Hub</h2>
+                  <h2 className="font-bold text-base text-gray-900">{areaName}</h2>
                   <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
                     <span className="material-symbols-outlined text-xs">distance</span>
-                    0.2 km away
+                    {myLocation ? `Your Location (${myLocation.lat.toFixed(4)}, ${myLocation.lng.toFixed(4)})` : "GPS Acquiring..."}
                   </p>
                 </div>
                 <div
@@ -555,6 +705,20 @@ function HeatmapPage() {
                   {isRouting ? "Routing..." : "Route"}
                 </button>
               </div>
+
+              {/* Show Route Distance and Duration if calculated */}
+              {routePolyline && distance && duration && (
+                <div className="flex items-center justify-between bg-green-50 text-green-800 border border-green-200 rounded-xl px-3 py-2 mt-1">
+                  <div className="flex items-center gap-1.5 font-bold text-xs">
+                    <span className="material-symbols-outlined text-sm">directions_walk</span>
+                    {distance}
+                  </div>
+                  <div className="flex items-center gap-1.5 font-bold text-xs">
+                    <span className="material-symbols-outlined text-sm">schedule</span>
+                    {duration}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

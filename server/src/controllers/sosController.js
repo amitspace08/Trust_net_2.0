@@ -450,3 +450,19 @@ export const declineLayer2 = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+
+export const archiveSOS = async (req, res, next) => {
+  try {
+    const data = req.body;
+    if (!data || !data.firebaseId) {
+       return res.status(400).json({ success: false, message: "Invalid payload" });
+    }
+    const SosArchive = (await import("../models/SosArchive.js")).default;
+    const doc = await SosArchive.create(data);
+    res.status(201).json({ success: true, archiveId: doc._id });
+  } catch (err) {
+    console.error("Archive error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};

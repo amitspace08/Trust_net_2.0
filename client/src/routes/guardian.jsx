@@ -1,14 +1,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import {
-  registerAsGuardianAngel,
-  setGuardianAvailability,
-  declineLayer3,
-  acknowledgeLayer3,
-  getDistance,
-} from "../services/guardianService";
+import { registerAsGuardianAngel, setGuardianAvailability, declineLayer3, acknowledgeLayer3, getDistance } from "../services/guardianService";
 import { subscribeToSOS } from "../services/sosService";
-import { auth } from "../firebase/firebase";
+import { auth, db } from "../firebase/firebase";
+import { useAuth } from "../lib/auth";
+import { doc, onSnapshot, query, collection, where, getDocs, updateDoc } from "firebase/firestore";
+import { UserAvatar } from "../components/ui/UserAvatar";
 
 export const Route = createFileRoute("/guardian")({
   head: () => ({
@@ -31,27 +28,73 @@ const DEFAULT_PROFILE = {
 
 function GuardianPage() {
   const navigate = useNavigate();
-  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const { user } = useAuth();
+  
+  const [profile, setProfile] = useState({
+    registered: false,
+    available: false,
+    totalResponses: 0,
+    rating: 0,
+    responseHistory: [],
+  });
+  const [loading, setLoading] = useState(true);
   const [agreed, setAgreed] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
 
-  // ── Incoming SOS alert state ─────────────────────────────────────────────
   const [incomingAlert, setIncomingAlert] = useState(null);
   const [alertDistance, setAlertDistance] = useState(null);
   const [alertCountdown, setAlertCountdown] = useState(30);
   const [myLoc, setMyLoc] = useState(null);
   const countdownRef = useRef(null);
-  const alertDismissed = useRef(false);
+  
+  // Persist dismissed alerts across page reloads
+  const dismissedAlerts = useRef(
+    new Set(JSON.parse(sessionStorage.getItem("dismissed_guardian_alerts") || "[]"))
+  );
 
+  const addDismissed = (id) => {
+    dismissedAlerts.current.add(id);
+    sessionStorage.setItem("dismissed_guardian_alerts", JSON.stringify(Array.from(dismissedAlerts.current)));
+  };
+
+  // ── Real-time User Document Subscription ────────────────────────────────
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("trustnet_guardian_profile");
-      if (raw) setProfile(JSON.parse(raw));
-    } catch {
-      /* fallback */
-    }
-  }, []);
+    if (!user?.id) return;
+    
+    const unsub = onSnapshot(doc(db, "users", String(user.id)), async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        
+        // Optionally fetch history if we stored it in a subcollection or sos_sessions
+        const qHistory = query(collection(db, "sos_sessions"), where("responderUID", "==", String(user.id)));
+        let history = [];
+        try {
+           const hSnap = await getDocs(qHistory);
+           history = hSnap.docs.map(d => {
+             const sd = d.data();
+             return {
+               id: d.id,
+               date: sd.createdAt?.toDate ? sd.createdAt.toDate().toLocaleDateString() : "Recently",
+               outcome: sd.active ? "In Progress" : "Assisted",
+               location: "Nearby Location"
+             };
+           });
+        } catch(e) {}
+        
+        setProfile({
+          registered: data.isGuardianAngel || false,
+          available: data.guardianAvailable || false,
+          totalResponses: data.guardianResponseCount || 0,
+          rating: data.guardianRating || 5.0,
+          responseHistory: history,
+        });
+      }
+      setLoading(false);
+    });
+    
+    return () => unsub();
+  }, [user]);
 
   // ── Grab GA's own GPS location once ──────────────────────────────────────
   useEffect(() => {
@@ -69,12 +112,31 @@ function GuardianPage() {
   useEffect(() => {
     if (!profile.registered || !profile.available) return;
     const unsub = subscribeToSOS((sessions) => {
-      if (alertDismissed.current) return;
       const nearby = sessions.find((s) => {
         if (!s.latitude || !s.longitude || !myLoc) return false;
+        
+        // Ignore the hardcoded test session if it somehow got stuck
+        if (s.id === "test-session-123") return false;
+
+        // Strictly ignore stale sessions (older than 5 minutes) to avoid test ghosting
+        if (!s.createdAt) return false; // Ignore poorly formed test sessions
+        if (typeof s.createdAt.toMillis === "function") {
+          const ageMs = Date.now() - s.createdAt.toMillis();
+          if (ageMs > 5 * 60 * 1000) return false; // > 5 mins
+        } else if (typeof s.createdAt === "number") {
+          if (Date.now() - s.createdAt > 5 * 60 * 1000) return false;
+        }
+
+        if (dismissedAlerts.current.has(s.id)) return false;
+        if (s.layer3Declined?.includes(user?.id)) return false; // Also check Firebase declined list
+        // Only trigger Guardian Angel for Layer 3 escalated incidents
+        if (s.layerActive !== 3) return false; 
+        // Don't alert the user for their own SOS
+        if (s.triggeredBy === user?.id) return false;
         const dist = getDistance(myLoc.lat, myLoc.lng, s.latitude, s.longitude);
         return dist <= 2000; // within 2 km
       });
+
       if (nearby && !incomingAlert) {
         const dist = myLoc
           ? Math.round(getDistance(myLoc.lat, myLoc.lng, nearby.latitude, nearby.longitude))
@@ -82,11 +144,14 @@ function GuardianPage() {
         setIncomingAlert(nearby);
         setAlertDistance(dist);
         setAlertCountdown(30);
-        alertDismissed.current = false;
+      } else if (!nearby && incomingAlert) {
+        // The SOS session was cancelled, resolved, or we dismissed it
+        setIncomingAlert(null);
+        if (countdownRef.current) clearInterval(countdownRef.current);
       }
     });
     return () => unsub();
-  }, [profile.registered, profile.available, myLoc, incomingAlert]);
+  }, [profile.registered, profile.available, myLoc, incomingAlert, user?.id]);
 
   // ── 30-second countdown while alert is showing ───────────────────────────
   useEffect(() => {
@@ -97,7 +162,8 @@ function GuardianPage() {
         if (prev <= 1) {
           clearInterval(countdownRef.current);
           // Auto-dismiss on timeout
-          alertDismissed.current = true;
+          addDismissed(incomingAlert.id);
+          declineLayer3(incomingAlert.id, user?.id || "amit123").catch(() => {});
           setIncomingAlert(null);
           return 0;
         }
@@ -107,12 +173,12 @@ function GuardianPage() {
     return () => {
       if (countdownRef.current) clearInterval(countdownRef.current);
     };
-  }, [incomingAlert]);
+  }, [incomingAlert, user?.id]);
 
   const handleAcceptAlert = async () => {
     if (!incomingAlert) return;
     clearInterval(countdownRef.current);
-    alertDismissed.current = true;
+    addDismissed(incomingAlert.id);
     try {
       const uid = getUid();
       await acknowledgeLayer3(incomingAlert.id, uid);
@@ -126,7 +192,7 @@ function GuardianPage() {
   const handleDeclineAlert = async () => {
     if (!incomingAlert) return;
     clearInterval(countdownRef.current);
-    alertDismissed.current = true;
+    addDismissed(incomingAlert.id);
     try {
       const uid = getUid();
       await declineLayer3(incomingAlert.id, uid);
@@ -159,11 +225,6 @@ function GuardianPage() {
     return "Guardian Angel";
   };
 
-  const saveProfile = (updated) => {
-    setProfile(updated);
-    localStorage.setItem("trustnet_guardian_profile", JSON.stringify(updated));
-  };
-
   const handleRegister = async () => {
     if (!agreed) return;
     setRegistering(true);
@@ -172,12 +233,12 @@ function GuardianPage() {
       const uid = getUid();
       const name = getName();
       await registerAsGuardianAngel(uid, name);
-      saveProfile({ ...profile, registered: true, available: true });
+      // Let onSnapshot handle state update
     } catch (err) {
       console.error("Error registering as Guardian Angel:", err);
       if (err.code === "permission-denied") {
         setErrorMsg(
-          "Permission Denied: You must be logged in via Firebase (not local fallback) to become a Guardian Angel.",
+          "Permission Denied: You must be logged in via Firebase to become a Guardian Angel."
         );
       } else {
         setErrorMsg(err.message || "Failed to register. Please try again.");
@@ -191,9 +252,21 @@ function GuardianPage() {
     try {
       const uid = getUid();
       await setGuardianAvailability(uid, updatedAvailable);
-      saveProfile({ ...profile, available: updatedAvailable });
+      // Let onSnapshot handle state update
     } catch (err) {
       console.error("Error toggling availability:", err);
+    }
+  };
+
+  const deregisterGuardian = async () => {
+    try {
+      const uid = getUid();
+      await updateDoc(doc(db, "users", uid), {
+         isGuardianAngel: false,
+         guardianAvailable: false
+      });
+    } catch (err) {
+      console.error("Error deregistering:", err);
     }
   };
 
@@ -350,8 +423,12 @@ function GuardianPage() {
       </header>
 
       {/* Main */}
-      <main className="flex-grow w-full max-w-2xl mx-auto px-4 py-6 md:ml-72 pb-24 md:pb-8 flex flex-col gap-6">
-        {!profile.registered ? (
+      <main className="flex-grow w-full max-w-5xl mx-auto px-4 py-6  pb-24 md:pb-8 flex flex-col gap-6">
+        {loading ? (
+           <div className="flex justify-center items-center h-48 animate-pulse text-amber-500">
+             <span className="material-symbols-outlined text-4xl">security</span>
+           </div>
+        ) : !profile.registered ? (
           <div className="flex flex-col gap-6 animate-fade-in">
             {/* Hero Banner */}
             <div className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-3xl p-7 text-white flex flex-col gap-4 shadow-xl">
@@ -462,15 +539,32 @@ function GuardianPage() {
                 </h1>
                 <p className="text-xs text-gray-500 mt-0.5">Your community helper profile</p>
               </div>
-              <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2.5 py-1 rounded-full flex items-center gap-1">
-                <span
-                  className="material-symbols-outlined text-xs"
-                  style={{ fontVariationSettings: "'FILL' 1" }}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                     setIncomingAlert({
+                       id: "test-session-123",
+                       latitude: myLoc ? myLoc.lat + 0.002 : 28.6139,
+                       longitude: myLoc ? myLoc.lng + 0.002 : 77.2090
+                     });
+                     setAlertDistance(240);
+                     setAlertCountdown(30);
+                  }}
+                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-[10px] font-bold px-3 py-1.5 rounded-full transition flex items-center gap-1 shadow-sm"
                 >
-                  verified
+                  <span className="material-symbols-outlined text-xs">science</span>
+                  Test Alert
+                </button>
+                <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2.5 py-1.5 rounded-full flex items-center gap-1 shadow-sm">
+                  <span
+                    className="material-symbols-outlined text-xs"
+                    style={{ fontVariationSettings: "'FILL' 1" }}
+                  >
+                    verified
+                  </span>
+                  Verified
                 </span>
-                Verified Guardian Angel
-              </span>
+              </div>
             </div>
 
             {/* AVAILABILITY TOGGLE — most prominent element */}
@@ -594,10 +688,11 @@ function GuardianPage() {
               </p>
               <div className="flex items-center gap-4">
                 <div className="relative">
-                  <img
-                    alt="Guardian Angel Profile"
-                    src="https://lh3.googleusercontent.com/aida-public/AB6AXuBaKBoKnNqKnNn5PWbMTe5gomvq-dzgEhryLZvEmyIGoU30YSiiR4-St6_9_Cte3wBAE96suYIqP5G40Y3Ij-pIuS-3_VeijFL9KrOa14J2ydjNX4LnCH-4YzytJZ2XwKS7PiBxckvJUAt9Fr57N0zvO0nqmahe821JAgA-LnThrSqjX94bKcWMXdyFIbsASMGhhTBWkLnkPwdOWhyyrJ8x5yJ_6frJqo2cYzHFzFIpovNxfg3X2IzYM-gXmzQaJy7o5A9oEj4nydsg"
-                    className="w-14 h-14 rounded-full object-cover border-2 border-amber-300 shadow"
+                  <UserAvatar
+                    name={user?.name || "Guardian Angel"}
+                    avatarUrl={user?.avatar || user?.profile_photo || ""}
+                    sizeClassName="w-14 h-14 text-xl font-bold"
+                    className="border-2 border-amber-300 shadow"
                   />
 
                   <span className="absolute -bottom-1 -right-1 bg-amber-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full border border-white flex items-center gap-0.5">
@@ -611,7 +706,7 @@ function GuardianPage() {
                   </span>
                 </div>
                 <div className="flex-1">
-                  <p className="font-bold text-sm text-gray-900">Rakesh Kumar</p>
+                  <p className="font-bold text-sm text-gray-900">{user?.name || user?.displayName || "Guardian Angel"}</p>
                   <div className="flex items-center gap-1 mt-0.5">
                     {"★★★★★".split("").map((s, i) => (
                       <span
@@ -625,7 +720,9 @@ function GuardianPage() {
                       {profile.rating} ({profile.totalResponses} responses)
                     </span>
                   </div>
-                  <p className="text-[10px] text-gray-500 mt-0.5">Verified Guardian • 340m away</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    Verified Guardian • {profile.available ? "Available to help" : "Off Duty"}
+                  </p>
                 </div>
               </div>
             </div>
@@ -668,12 +765,19 @@ function GuardianPage() {
               </ul>
             </div>
 
-            <button
-              onClick={() => saveProfile({ ...profile, registered: false, available: false })}
-              className="text-xs text-gray-400 hover:text-red-500 transition font-semibold text-center py-2"
-            >
-              Deregister as Guardian Angel
-            </button>
+            {/* Unregister Guardian Angel */}
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <button
+                onClick={deregisterGuardian}
+                className="w-full text-xs font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 py-3 rounded-xl transition flex items-center justify-center gap-2"
+              >
+                <span className="material-symbols-outlined text-sm">person_remove</span>
+                Unregister as Guardian Angel
+              </button>
+              <p className="text-[9px] text-gray-400 text-center mt-2 leading-relaxed px-4">
+                By unregistering, you will no longer receive Layer 3 SOS alerts or appear as a Guardian Angel in other users' Trust Circles.
+              </p>
+            </div>
           </div>
         )}
       </main>

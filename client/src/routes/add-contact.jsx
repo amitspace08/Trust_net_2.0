@@ -35,6 +35,14 @@ function AddContactPage() {
   const [sendingInvite, setSendingInvite] = useState(false);
   const [contacts, setContacts] = useState([]);
 
+  // Auto-update search result if the contact accepts the invite while looking at this screen
+  useEffect(() => {
+    if (searchResult && contacts.some((c) => c.id === searchResult.id)) {
+      setSearchResult((prev) => prev.relationshipStatus !== "accepted" ? { ...prev, relationshipStatus: "accepted" } : prev);
+      setInviteSuccess(false); // Hide the "Invitation sent successfully!" text once added
+    }
+  }, [contacts, searchResult]);
+
   // 1. Sync current contacts from Firestore trust_relationships
   useEffect(() => {
     if (!user) return;
@@ -114,8 +122,25 @@ function AddContactPage() {
         );
         setSearchResult(null);
       } else {
-        const foundDoc = snap.docs[0];
+        // If there are duplicate profiles (e.g. user re-registered), pick the most recently active one
+        const sortedDocs = [...snap.docs].sort((a, b) => {
+          const aTime = a.data().updatedAt?.toMillis?.() || 0;
+          const bTime = b.data().updatedAt?.toMillis?.() || 0;
+          return bTime - aTime;
+        });
+        
+        const foundDoc = sortedDocs[0];
         const fData = foundDoc.data();
+        
+        // Prevent sending request to yourself
+        if (foundDoc.id === String(user.id)) {
+          setInviteError("You cannot add yourself to your own Trust Circle.");
+          setSearchResult(null);
+          setSearching(false);
+          setSearched(true);
+          return;
+        }
+
         console.log(
           `[TrustNet Debug] Lookup result: Found matching user! UID: "${foundDoc.id}", Name: "${fData.name || fData.displayName}"`,
         );
@@ -274,7 +299,7 @@ function AddContactPage() {
         </button>
       </header>
 
-      <div className="max-w-md md:max-w-2xl mx-auto p-4 flex flex-col gap-6">
+      <div className="max-w-md md:max-w-5xl mx-auto p-4 flex flex-col gap-6">
         {/* Search Panel */}
         <section className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
           <h2 className="text-base font-bold text-gray-900 mb-2">Search TrustNet Network</h2>

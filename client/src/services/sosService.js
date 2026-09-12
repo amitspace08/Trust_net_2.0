@@ -33,6 +33,8 @@ export function clearSOSTimers(sessionId) {
   const timers = sosTimers.get(sessionId);
   if (timers) {
     if (timers.followUpTimeout) clearTimeout(timers.followUpTimeout);
+    if (timers.l2Timeout) clearTimeout(timers.l2Timeout);
+    if (timers.l3Timeout) clearTimeout(timers.l3Timeout);
     if (timers.locationInterval) clearInterval(timers.locationInterval);
     sosTimers.delete(sessionId);
   }
@@ -44,10 +46,17 @@ export function startSOSLocationUpdates(sessionId, uid) {
   // Ensure any existing interval is cleared first
   stopSOSLocationUpdates(sessionId);
   const interval = setInterval(() => {
-    // Placeholder location; replace with actual geolocation when integrated with client
-    const lat = 28.6139;
-    const lng = 77.209;
-    updateLiveSOSLocation(sessionId, uid, lat, lng);
+    if (typeof navigator !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          updateLiveSOSLocation(sessionId, uid, pos.coords.latitude, pos.coords.longitude);
+        },
+        (err) => {
+          console.error("SOS Location update failed:", err);
+        },
+        { enableHighAccuracy: true, maximumAge: 0 }
+      );
+    }
   }, 5_000);
   const timers = sosTimers.get(sessionId) || {};
   timers.locationInterval = interval;
@@ -142,9 +151,15 @@ export async function triggerSOS(uid, arg2, arg3) {
 
     // Follow‑up notification at 45 seconds
     const followUpTimeout = setTimeout(() => notifyLayer1FollowUp(docRef.id), 45_000);
+    // Local development fallback for Layer 2 & 3 escalation 
+    // (since Cloud Functions may not be running)
+    const l2Timeout = setTimeout(() => triggerLayer2(docRef.id, { lat, lng }), 60_000);
+    const l3Timeout = setTimeout(() => triggerLayer3(docRef.id), 90_000);
 
     sosTimers.set(docRef.id, {
       followUpTimeout,
+      l2Timeout,
+      l3Timeout,
     });
 
     return docRef.id;
@@ -191,25 +206,23 @@ export async function cancelSOS(sessionId) {
 // Acknowledge SOS
 // ==============================
 
-export async function acknowledgeSOS(
-  sessionId,
-
-  responderUID,
-) {
+export async function acknowledgeSOS(sessionId, responderUID) {
   try {
+    const userSnap = await getDoc(doc(db, "users", responderUID));
+    const responderName = userSnap.exists() ? userSnap.data().name || userSnap.data().displayName : "A Responder";
+
     await updateDoc(
       doc(db, "sos_sessions", sessionId),
-
       {
+        responderUID: responderUID,
+        responderName: responderName,
         layer1Acknowledged: responderUID,
-
-        status: "resolved",
+        status: "active",
       },
     );
     clearSOSTimers(sessionId);
   } catch (err) {
     console.error(err);
-
     throw err;
   }
 }
@@ -410,9 +423,14 @@ export async function triggerLayer2(sessionId, distressedLocation) {
 
 export async function acknowledgeLayer2(sessionId, responderUID) {
   try {
+    const userSnap = await getDoc(doc(db, "users", responderUID));
+    const responderName = userSnap.exists() ? userSnap.data().name || userSnap.data().displayName : "A Responder";
+
     await updateDoc(doc(db, "sos_sessions", sessionId), {
+      responderUID: responderUID,
+      responderName: responderName,
       layer2Acknowledged: responderUID,
-      status: "resolved",
+      status: "active",
     });
     clearSOSTimers(sessionId);
   } catch (err) {

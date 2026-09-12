@@ -60,9 +60,21 @@ function SosEmergencyPage() {
   const MapResizer = () => {
     const map = useMap();
     useEffect(() => {
-      const timer = setTimeout(() => map.invalidateSize(), 250);
+      const timer = setTimeout(() => {
+        map.invalidateSize();
+      }, 250);
       return () => clearTimeout(timer);
     }, [map]);
+    return null;
+  };
+
+  const FlyToBounds = ({ bounds }) => {
+    const map = useMap();
+    useEffect(() => {
+      if (bounds) {
+        map.fitBounds(bounds, { padding: [50, 50], animate: true, duration: 1.2 });
+      }
+    }, [bounds, map]);
     return null;
   };
 
@@ -87,7 +99,22 @@ function SosEmergencyPage() {
     };
   }, []);
 
-  const [activeState, setActiveState] = useState("countdown");
+  const [activeState, setActiveState] = useState(() => {
+    if (typeof window !== "undefined") {
+      const storedState = localStorage.getItem("trustnet_sos_state");
+      if (storedState) {
+        try {
+          return JSON.parse(storedState).status || "active";
+        } catch (e) {
+          return "active";
+        }
+      }
+      if (localStorage.getItem("trustnet_active_sos_session")) {
+        return "active";
+      }
+    }
+    return "countdown";
+  });
   const [secondsLeft, setSecondsLeft] = useState(10);
   const contacts = useLayer1Contacts();
   const layer2Contacts = useLayer2Contacts();
@@ -127,6 +154,9 @@ function SosEmergencyPage() {
   const [responderLocation, setResponderLocation] = useState(null);
   const [responderRoute, setResponderRoute] = useState(null);
   const [lastResponderRoutedLocation, setLastResponderRoutedLocation] = useState(null);
+  const [responderDistanceKm, setResponderDistanceKm] = useState(null);
+  const [responderEtaMins, setResponderEtaMins] = useState(null);
+  const [mapBounds, setMapBounds] = useState(null);
 
   const [pulseRadius, setPulseRadius] = useState(500);
 
@@ -173,35 +203,8 @@ function SosEmergencyPage() {
     return () => unsubscribe();
   }, [sessionId]);
 
-  // Browser best-effort SOS tracking with background/battery-saving support
-  useEffect(() => {
-    if (!sessionId || !user || !location || activeState === "countdown" || isSafeEnded) return;
-
-    let intervalId;
-
-    const startPublishInterval = () => {
-      const isBackground = document.visibilityState === "hidden";
-      const intervalMs = isBackground ? 10_000 : 5_000; // 10s in background, 5s in foreground
-      const publish = () =>
-        updateLiveSOSLocation(sessionId, user.id, location.lat, location.lng).catch(console.error);
-
-      publish();
-      intervalId = window.setInterval(publish, intervalMs);
-    };
-
-    const handleVisibilityChange = () => {
-      if (intervalId) window.clearInterval(intervalId);
-      startPublishInterval();
-    };
-
-    startPublishInterval();
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      if (intervalId) window.clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [activeState, isSafeEnded, location, sessionId, user]);
+  // Browser best-effort SOS tracking was moved to the global useLiveLocationTracker hook.
+  // This ensures location tracking persists across route navigation.
 
   // Fetch coordinates of alerted GAs to render gold pins
   useEffect(() => {
@@ -253,6 +256,59 @@ function SosEmergencyPage() {
     });
     return () => unsubscribe();
   }, [responderUID]);
+
+
+  // Calculate Distance, Route, and Update Bounds
+  useEffect(() => {
+    if (location && responderLocation) {
+      let rLat = responderLocation.lat;
+      let rLng = responderLocation.lng;
+      let dLat = location.lat;
+      let dLng = location.lng;
+
+      if (Math.abs(rLat - dLat) < 0.0001 && Math.abs(rLng - dLng) < 0.0001) {
+        // Add tiny padding if coordinates are identical to prevent Leaflet from max-zooming
+        rLat += 0.001;
+        dLat -= 0.001;
+      }
+      setMapBounds(L.latLngBounds([dLat, dLng], [rLat, rLng]));
+
+      const fetchRoute = async () => {
+        try {
+          const res = await fetch(
+            `https://router.project-osrm.org/route/v1/driving/${rLng},${rLat};${dLng},${dLat}?overview=full&geometries=geojson`
+          );
+          const data = await res.json();
+          if (data.routes && data.routes.length > 0) {
+            const route = data.routes[0];
+            const latLngs = route.geometry.coordinates.map((coord) => [coord[1], coord[0]]);
+            setResponderRoute(latLngs);
+            
+            const distKm = route.distance / 1000;
+            setResponderDistanceKm(Number(distKm.toFixed(2)));
+            setResponderEtaMins(Math.max(1, Math.ceil(route.duration / 60)));
+          } else {
+            // Fallback to Haversine
+            const distMeters = getDistance(dLat, dLng, rLat, rLng);
+            const distKm = distMeters / 1000;
+            setResponderDistanceKm(Number(distKm.toFixed(2)));
+            setResponderEtaMins(Math.max(1, Math.ceil(distKm * 3))); // Fallback ETA assuming ~20km/h driving
+            setResponderRoute(null);
+          }
+        } catch (err) {
+          console.error("Failed to calculate route:", err);
+          // Fallback to Haversine
+          const distMeters = getDistance(dLat, dLng, rLat, rLng);
+          const distKm = distMeters / 1000;
+          setResponderDistanceKm(Number(distKm.toFixed(2)));
+          setResponderEtaMins(Math.max(1, Math.ceil(distKm * 3)));
+          setResponderRoute(null);
+        }
+      };
+
+      fetchRoute();
+    }
+  }, [location, responderLocation]);
 
   // Directions to Safe Space
   useEffect(() => {
@@ -328,7 +384,7 @@ function SosEmergencyPage() {
       setActiveState("active");
       localStorage.setItem(
         "trustnet_sos_state",
-        JSON.stringify({ status: "active", layer: 1, distressedUser: "Priya Sharma" }),
+        JSON.stringify({ status: "active", layer: 1, distressedUser: user?.displayName || user?.name || "Unknown" }),
       );
       return;
     }
@@ -462,6 +518,23 @@ function SosEmergencyPage() {
         setSessionId(newSessionId);
         localStorage.setItem("trustnet_active_sos_session", newSessionId);
         console.log("Firebase: SOS Session Created");
+        
+        // Auto-Audio Privacy Setting Check
+        import("firebase/firestore").then(async ({ getDoc, doc }) => {
+           import("../firebase/firebase").then(async ({ db }) => {
+              const uSnap = await getDoc(doc(db, "users", user.id));
+              if (uSnap.exists() && uSnap.data().privacySettings?.autoAudio) {
+                 try {
+                   await navigator.mediaDevices.getUserMedia({ audio: true });
+                   console.log("Auto-Audio started per Privacy settings");
+                   // In a real app, MediaRecorder would push chunks to Firebase Storage here
+                 } catch (e) {
+                   console.error("Auto-audio failed to get mic:", e);
+                 }
+              }
+           });
+        });
+
       } catch (err) {
         console.error("Firebase L1 trigger failed:", err);
       }
@@ -479,6 +552,7 @@ function SosEmergencyPage() {
   // Cancel before countdown completes
   const handleCancelCountdown = () => {
     localStorage.removeItem("trustnet_sos_state");
+    localStorage.removeItem("trustnet_active_sos_session");
     router.navigate({ to: "/" });
   };
 
@@ -525,7 +599,7 @@ function SosEmergencyPage() {
   // ── RENDER ENDED SCREEN ──
   if (isSafeEnded) {
     return (
-      <div className="w-full md:w-[calc(100%-18rem)] md:ml-72 min-h-screen bg-[#faf9fc] flex flex-col justify-between items-center p-6 text-gray-800 select-none animate-fade-in">
+      <div className="w-full   min-h-screen bg-[#faf9fc] flex flex-col justify-between items-center p-6 text-gray-800 select-none animate-fade-in">
         <div className="flex-grow flex flex-col items-center justify-center max-w-sm mx-auto text-center gap-6">
           <div className="w-20 h-20 rounded-full bg-green-100 border-2 border-green-500 text-green-600 flex items-center justify-center shadow-lg animate-scale-in">
             <span className="material-symbols-outlined text-4xl font-black">check</span>
@@ -585,6 +659,7 @@ function SosEmergencyPage() {
           <button
             onClick={() => {
               localStorage.removeItem("trustnet_sos_state");
+              localStorage.removeItem("trustnet_active_sos_session");
               router.navigate({ to: "/" });
             }}
             className="w-full bg-[#0d631b] hover:bg-[#0a5215] text-white font-bold py-4 rounded-xl shadow-md transition active:scale-[0.98] flex items-center justify-center gap-2"
@@ -600,7 +675,7 @@ function SosEmergencyPage() {
   // ── RENDER SEARCHING L2 SCREEN ──
   if (activeState === "l2-searching") {
     return (
-      <div className="w-full md:w-[calc(100%-18rem)] md:ml-72 min-h-screen bg-indigo-900 flex flex-col justify-between items-center p-6 text-white select-none animate-fade-in relative">
+      <div className="w-full   min-h-screen bg-indigo-900 flex flex-col justify-between items-center p-6 text-white select-none animate-fade-in relative">
         <div className="absolute inset-0 bg-gradient-to-b from-indigo-950 via-indigo-900 to-indigo-850 opacity-95 pointer-events-none" />
 
         <header className="text-center pt-12 z-10">
@@ -649,7 +724,7 @@ function SosEmergencyPage() {
   // ── RENDER SEARCHING L3 SCREEN ──
   if (activeState === "l3-searching") {
     return (
-      <div className="w-full md:w-[calc(100%-18rem)] md:ml-72 min-h-screen bg-amber-900 flex flex-col justify-between items-center p-6 text-white select-none animate-fade-in relative">
+      <div className="w-full   min-h-screen bg-amber-900 flex flex-col justify-between items-center p-6 text-white select-none animate-fade-in relative">
         <div className="absolute inset-0 bg-gradient-to-b from-amber-950 via-amber-900 to-orange-900 opacity-95 pointer-events-none" />
 
         <header className="text-center pt-12 z-10">
@@ -704,7 +779,7 @@ function SosEmergencyPage() {
   // ── RENDER SEARCHING POLICE SCREEN ──
   if (activeState === "police-searching") {
     return (
-      <div className="w-full md:w-[calc(100%-18rem)] md:ml-72 min-h-screen bg-red-900 flex flex-col justify-between items-center p-6 text-white select-none animate-fade-in relative">
+      <div className="w-full   min-h-screen bg-red-900 flex flex-col justify-between items-center p-6 text-white select-none animate-fade-in relative">
         <div className="absolute inset-0 bg-gradient-to-b from-red-950 via-red-900 to-red-800 opacity-95 pointer-events-none" />
 
         <header className="text-center pt-12 z-10">
@@ -756,7 +831,7 @@ function SosEmergencyPage() {
   // ── RENDER COUNTDOWN SCREEN ──
   if (activeState === "countdown") {
     return (
-      <div className="w-full md:w-[calc(100%-18rem)] md:ml-72 min-h-screen bg-red-600 flex flex-col justify-between items-center p-6 text-white select-none animate-fade-in relative">
+      <div className="w-full   min-h-screen bg-red-600 flex flex-col justify-between items-center p-6 text-white select-none animate-fade-in relative">
         <div className="absolute inset-0 bg-radial-gradient from-red-500 via-red-600 to-red-700 pointer-events-none" />
         <span className="absolute inset-0 bg-red-500/10 animate-pulse pointer-events-none" />
 
@@ -850,8 +925,18 @@ function SosEmergencyPage() {
       )
     : { top: "40%", left: "52%" };
 
+  let visualResponderLat = responderLocation?.lat;
+  let visualResponderLng = responderLocation?.lng;
+
+  if (location && responderLocation) {
+    if (Math.abs(responderLocation.lat - location.lat) < 0.0001 && Math.abs(responderLocation.lng - location.lng) < 0.0001) {
+      visualResponderLat += 0.0005;
+      visualResponderLng += 0.0005;
+    }
+  }
+
   return (
-    <div className="w-full md:w-[calc(100%-18rem)] md:ml-72 min-h-screen bg-[#faf9fc] flex flex-col justify-between items-center text-gray-800 select-none animate-fade-in relative">
+    <div className="w-full   min-h-screen bg-[#faf9fc] flex flex-col justify-between items-center text-gray-800 select-none animate-fade-in relative">
       {/* 1. Header Banner showing current layer color-coded */}
       <div
         className={`w-full px-5 py-3.5 flex items-center justify-between shadow-md relative overflow-hidden z-20 ${getLayerColorClass()}`}
@@ -885,15 +970,16 @@ function SosEmergencyPage() {
             style={{ width: "100%", height: "100%", position: "absolute", top: 0, left: 0 }}
           >
             <MapResizer />
+            {mapBounds && <FlyToBounds bounds={mapBounds} />}
             <TileLayer 
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" 
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             />
 
             {/* Live User Marker */}
-            <Marker position={[location.lat, location.lng]} icon={redIcon}>
+            <Marker position={[location.lat, location.lng]} icon={redIcon} zIndexOffset={1000}>
               <Tooltip permanent direction="top" offset={[0, -12]} className="font-bold">
-                Priya (You)
+                {user?.displayName || user?.name || "You"} (You)
               </Tooltip>
             </Marker>
 
@@ -982,28 +1068,29 @@ function SosEmergencyPage() {
               })}
 
             {/* Responding Helper route and Pin */}
-            {responderName && (
+            {responderName && responderLocation && (
               <>
                 <Polyline
-                  positions={[
-                    [location.lat, location.lng],
-                    gaLocations.length > 0
-                      ? [gaLocations[0].latitude, gaLocations[0].longitude]
-                      : [location.lat + 0.002, location.lng + 0.002],
-                  ]}
-                  pathOptions={{ color: "#3b82f6", weight: 4 }}
+                  positions={
+                    responderRoute || [
+                      [location.lat, location.lng],
+                      [visualResponderLat, visualResponderLng],
+                    ]
+                  }
+                  pathOptions={{
+                    color: "#3b82f6",
+                    weight: 5,
+                    dashArray: responderRoute ? null : "10,10",
+                  }}
                 />
 
                 <Marker
-                  position={
-                    gaLocations.length > 0
-                      ? [gaLocations[0].latitude, gaLocations[0].longitude]
-                      : [location.lat + 0.002, location.lng + 0.002]
-                  }
+                  position={[visualResponderLat, visualResponderLng]}
                   icon={blueIcon}
+                  zIndexOffset={500}
                 >
-                  <Tooltip permanent direction="top" className="text-blue-700 font-bold">
-                    {responderName} (Responding!)
+                  <Tooltip permanent direction="top">
+                    {responderName}
                   </Tooltip>
                 </Marker>
               </>
@@ -1049,6 +1136,12 @@ function SosEmergencyPage() {
               </p>
             </div>
           </div>
+          {responderName && responderDistanceKm !== null && (
+            <div className="flex flex-col items-end text-right">
+              <span className="text-xs font-bold text-blue-600">ETA: {responderEtaMins} mins</span>
+              <span className="text-[10px] text-gray-500">{responderDistanceKm} km away</span>
+            </div>
+          )}
         </div>
 
         {/* 4-Node Escalation Timeline */}
@@ -1172,10 +1265,14 @@ function SosEmergencyPage() {
                   : `${nearestSpace.name} is ${nearestSpace.distance}m away · ~${Math.max(1, Math.ceil(nearestSpace.distance / 80))} min walk`}
               </p>
             </div>
-            <a
-              href={`https://www.google.com/maps/dir/?api=1&destination=${nearestSpace.latitude},${nearestSpace.longitude}&travelmode=walking`}
-              target="_blank"
-              rel="noopener noreferrer"
+            <Link
+              to="/heatmap"
+              search={{
+                targetLat: nearestSpace.latitude,
+                targetLng: nearestSpace.longitude,
+                targetName: nearestSpace.name,
+                targetRelation: "Safe Space"
+              }}
               className={`px-4 py-3 font-extrabold text-xs uppercase rounded-xl transition shadow active:scale-[0.98] shrink-0 ${
                 layer3Exhausted
                   ? "bg-white text-emerald-800 hover:bg-emerald-50 scale-105"
@@ -1183,7 +1280,7 @@ function SosEmergencyPage() {
               }`}
             >
               Directions
-            </a>
+            </Link>
           </div>
         )}
 

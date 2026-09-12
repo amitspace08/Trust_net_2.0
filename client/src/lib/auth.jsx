@@ -1,5 +1,25 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import api from "../services/api";
+import { db } from "../firebase/firebase";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+
+// Sync user profile to Firestore so search works in Trust Circle
+async function syncUserToFirestore(user) {
+  try {
+    console.log("[TrustNet] Syncing user to Firestore:", user.email, "ID:", String(user.id));
+    await setDoc(doc(db, "users", String(user.id)), {
+      name: user.name,
+      displayName: user.name,
+      email: user.email,
+      uid: String(user.id),
+      online: true,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    console.log("[TrustNet] Firestore sync SUCCESS for:", user.email);
+  } catch (err) {
+    console.error("[TrustNet] Firestore sync FAILED:", err.code, err.message);
+  }
+}
 
 const KEY = "trustnet_auth_user";
 
@@ -18,14 +38,16 @@ export function AuthProvider({ children }) {
           if (stored && stored.token) {
             const res = await api.get("/auth/me");
             if (res.data.success) {
-              setUser({
+              const loggedUser = {
                 id: res.data.user.id,
                 uid: res.data.user.id,
                 name: res.data.user.name,
                 displayName: res.data.user.name,
                 email: res.data.user.email,
                 token: stored.token
-              });
+              };
+              setUser(loggedUser);
+              syncUserToFirestore(loggedUser); // sync on every page load
             } else {
               localStorage.removeItem(KEY);
             }
@@ -61,6 +83,7 @@ export function AuthProvider({ children }) {
         };
         setUser(loggedUser);
         localStorage.setItem(KEY, JSON.stringify(loggedUser));
+        await syncUserToFirestore(loggedUser);
       } catch (err) {
         console.error("REST Login Error:", err);
         const status = err.response?.status;
@@ -90,6 +113,7 @@ export function AuthProvider({ children }) {
         };
         setUser(loggedUser);
         localStorage.setItem(KEY, JSON.stringify(loggedUser));
+        await syncUserToFirestore(loggedUser);
       } catch (err) {
         console.error("REST Signup Error:", err);
         if (err.response?.data?.message === "User already exists") {
@@ -101,6 +125,18 @@ export function AuthProvider({ children }) {
       }
     },
     async logout() {
+      if (user?.id) {
+        try {
+          const { updateDoc, doc } = await import("firebase/firestore");
+          // Set user offline
+          await updateDoc(doc(db, "users", String(user.id)), { online: false });
+          // Stop live location sharing
+          const { stopSharing } = await import("../services/locationService");
+          await stopSharing(user.id);
+        } catch (e) {
+          console.error("Failed to clean up Firebase on logout:", e);
+        }
+      }
       setUser(null);
       localStorage.removeItem(KEY);
       localStorage.removeItem("trustnet_active_sos_session");

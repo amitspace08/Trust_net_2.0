@@ -75,10 +75,7 @@ export function useLayer1Contacts() {
                 name: uData.name || uData.displayName || "Contact",
                 phone: uData.phone || uData.phone_no || "",
                 relation: data.relation || "Friend",
-                avatar:
-                  uData.avatar ||
-                  uData.profile_photo ||
-                  "https://images.unsplash.com/photo-1534528741775-53994a69daeb",
+                avatar: uData.avatar || uData.profile_photo || "",
                 online: uData.online ?? true,
                 status: data.inactive ? "Inactive" : "Active",
                 at: data.createdAt?.seconds ? data.createdAt.seconds * 1000 : Date.now(),

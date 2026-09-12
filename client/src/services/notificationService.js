@@ -113,6 +113,12 @@ export async function notifyLayer1(sessionId) {
     const contacts = data.layer1Alerted || [];
 
     for (const uid of contacts) {
+      // Check if user is a Guardian Angel - if so, skip Layer 1 as per requirements
+      const targetSnap = await getDoc(doc(db, "users", uid));
+      if (targetSnap.exists() && targetSnap.data().isGuardianAngel) {
+        continue;
+      }
+
       await sendNotification(
         uid,
         data.triggeredBy,
@@ -138,7 +144,6 @@ export async function notifyLayer1FollowUp(sessionId) {
     if (!snap.exists()) return;
     const data = snap.data();
 
-    // Check if the session is still active and no one has acknowledged it
     if (data.status !== "active" || data.layer1Acknowledged) return;
 
     const user = await getUser(data.triggeredBy);
@@ -146,6 +151,10 @@ export async function notifyLayer1FollowUp(sessionId) {
     const contacts = data.layer1Alerted || [];
 
     for (const uid of contacts) {
+      const targetSnap = await getDoc(doc(db, "users", uid));
+      if (targetSnap.exists() && targetSnap.data().isGuardianAngel) {
+        continue;
+      }
       await sendNotification(
         uid,
         data.triggeredBy,
@@ -203,7 +212,6 @@ export async function notifyResponders(sessionId) {
     const respondersSnap = await getDocs(collection(db, "sos_sessions", sessionId, "responders"));
     const responders = respondersSnap.docs.map((doc) => doc.id);
 
-    // Combine all unique users who might have an active SOS notification
     const allToNotify = Array.from(new Set([...layer1Alerted, ...layer2Alerted, ...responders]));
 
     await Promise.all(
@@ -249,6 +257,10 @@ export async function getNotifications(uid) {
 export async function notifyLayer2(sessionId, candidateUIDs, distressedUID) {
   try {
     for (const uid of candidateUIDs) {
+      const targetSnap = await getDoc(doc(db, "users", uid));
+      if (targetSnap.exists() && targetSnap.data().isGuardianAngel) {
+        continue;
+      }
       const mutual = await getMutualConnection(distressedUID, uid);
 
       const message = mutual

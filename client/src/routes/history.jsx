@@ -1,148 +1,170 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { HtmlPage } from "../lib/html-page";
+import { useEffect, useState } from "react";
 import { useAuth } from "../lib/auth";
-
-const HTML = `
-<!-- Main Canvas -->
-
-<!-- Main Canvas -->
-<main class="flex-grow w-full max-w-4xl mx-auto px-margin-mobile md:px-margin-tablet py-6 md:ml-72 pb-32 md:pb-6 flex flex-col gap-stack-gap">
-  <!-- Header -->
-  <div class="mb-stack-gap">
-    <h1 class="font-headline-lg-mobile text-headline-lg-mobile md:font-headline-lg md:text-headline-lg text-on-background mb-2">Safety History</h1>
-    <p class="font-body-md text-body-md text-on-surface-variant">Review your historical safety tracking logs, active safe zones, and incident timelines.</p>
-  </div>
-
-  <!-- Bento Stats Section -->
-  <section class="grid grid-cols-3 gap-component-gap">
-    <div class="bg-surface-container-low rounded-xl p-4 flex flex-col justify-between border border-outline-variant/30 h-28">
-      <span class="font-label-md text-label-md text-on-surface-variant">Safe Journeys</span>
-      <span class="font-headline-lg text-headline-lg text-primary font-bold">142</span>
-    </div>
-    <div class="bg-surface-container-low rounded-xl p-4 flex flex-col justify-between border border-outline-variant/30 h-28">
-      <span class="font-label-md text-label-md text-on-surface-variant">Escalations Avoided</span>
-      <span class="font-headline-lg text-headline-lg text-secondary font-bold">3</span>
-    </div>
-    <div class="bg-surface-container-low rounded-xl p-4 flex flex-col justify-between border border-outline-variant/30 h-28">
-      <span class="font-label-md text-label-md text-on-surface-variant">Days Protected</span>
-      <span class="font-headline-lg text-headline-lg text-tertiary font-bold">120</span>
-    </div>
-  </section>
-
-  <!-- Safety Timeline -->
-  <section class="bg-surface-container-low rounded-xl p-6 border border-outline-variant/30 flex flex-col gap-6">
-    <h2 class="font-title-lg text-title-lg text-on-background">Recent Safety Log</h2>
-    
-    <div class="flex flex-col gap-6 relative pl-6 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-surface-variant">
-      <!-- Item 1 -->
-      <div class="relative flex flex-col gap-1">
-        <span class="absolute -left-6 top-1.5 w-3 h-3 rounded-full bg-primary border-2 border-surface"></span>
-        <div class="flex justify-between items-start">
-          <h3 class="font-title-md text-title-md text-on-background">Arrived Safely at Work</h3>
-          <span class="font-label-md text-label-md text-on-surface-variant">Today, 09:12 AM</span>
-        </div>
-        <p class="font-body-md text-body-md text-on-surface-variant">Safe Check-In confirmed automatically near MG Road Metro Hub.</p>
-      </div>
-
-      <!-- Item 2 -->
-      <div class="relative flex flex-col gap-1">
-        <span class="absolute -left-6 top-1.5 w-3 h-3 rounded-full bg-secondary border-2 border-surface"></span>
-        <div class="flex justify-between items-start">
-          <h3 class="font-title-md text-title-md text-on-background">Escorted Walking Route</h3>
-          <span class="font-label-md text-label-md text-on-surface-variant">Yesterday, 10:30 PM</span>
-        </div>
-        <p class="font-body-md text-body-md text-on-surface-variant">Location tracking activated for walk between Indiranagar and home. Safe arrival verified.</p>
-      </div>
-
-      <!-- Item 3 -->
-      <div class="relative flex flex-col gap-1">
-        <span class="absolute -left-6 top-1.5 w-3 h-3 rounded-full bg-error border-2 border-surface animate-pulse"></span>
-        <div class="flex justify-between items-start">
-          <h3 class="font-title-md text-title-md text-error">SOS Overlay Triggered (Cancelled)</h3>
-          <span class="font-label-md text-label-md text-on-surface-variant">Jun 19, 06:14 PM</span>
-        </div>
-        <p class="font-body-md text-body-md text-on-surface-variant">SOS hold activated due to suspicious activity. Disarmed within 3 seconds using safety cancellation.</p>
-      </div>
-
-      <!-- Item 4 -->
-      <div class="relative flex flex-col gap-1">
-        <span class="absolute -left-6 top-1.5 w-3 h-3 rounded-full bg-primary border-2 border-surface"></span>
-        <div class="flex justify-between items-start">
-          <h3 class="font-title-md text-title-md text-on-background">Circle Guardian Added</h3>
-          <span class="font-label-md text-label-md text-on-surface-variant">Jun 18, 11:20 AM</span>
-        </div>
-        <p class="font-body-md text-body-md text-on-surface-variant">Rakesh Kumar verified and added as a Layer 1 Guardian contact.</p>
-      </div>
-    </div>
-  </section>
-</main>
-
-<!-- BottomNavBar (Mobile Only) -->
-<nav class="bg-surface-container-lowest dark:bg-surface-container-low text-primary dark:text-primary-fixed-dim font-label-md text-label-md fixed bottom-0 w-full z-50 rounded-t-xl shadow-sm dark:shadow-none flex justify-around items-center h-20 px-2 pb-safe md:hidden border-t border-surface-container-highest">
-  <a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-3 py-1 hover:bg-surface-container-high dark:hover:bg-surface-variant active:scale-90 transition-transform" href="#">
-    <span class="material-symbols-outlined">home</span>
-    <span class="mt-1">Home</span>
-  </a>
-  <a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-3 py-1 hover:bg-surface-container-high dark:hover:bg-surface-variant active:scale-90 transition-transform" href="#">
-    <span class="material-symbols-outlined">map</span>
-    <span class="mt-1">Heatmap</span>
-  </a>
-  <a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-3 py-1 hover:bg-surface-container-high dark:hover:bg-surface-variant active:scale-90 transition-transform" href="#">
-    <span class="material-symbols-outlined">group</span>
-    <span class="mt-1">Circle</span>
-  </a>
-  <a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-3 py-1 hover:bg-surface-container-high dark:hover:bg-surface-variant active:scale-90 transition-transform" href="#">
-    <span class="material-symbols-outlined">security</span>
-    <span class="mt-1">Guardian</span>
-  </a>
-  <a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-3 py-1 hover:bg-surface-container-high dark:hover:bg-surface-variant active:scale-90 transition-transform" href="#">
-    <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">person</span>
-    <span class="mt-1">Profile</span>
-  </a>
-</nav>
-`;
+import { collection, query, where, getDocs, or } from "firebase/firestore";
+import { db } from "../firebase/firebase";
 
 export const Route = createFileRoute("/history")({
   head: () => ({
     meta: [{ title: "TrustNet - Safety History" }],
   }),
-  component: Page,
+  component: HistoryPage,
 });
 
-function Page() {
+function HistoryPage() {
   const { user } = useAuth();
-  const avatarUrl = user?.avatar || user?.profile_photo || "";
-  const userName = user?.name || "User";
+  const [sessions, setSessions] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const isPlaceholder =
-    !avatarUrl || avatarUrl.includes("aida-public") || avatarUrl.includes("dicebear");
-  const initial = (userName || "U").trim().charAt(0).toUpperCase();
-  const bgClasses = [
-    "bg-blue-600",
-    "bg-emerald-600",
-    "bg-indigo-600",
-    "bg-purple-600",
-    "bg-rose-600",
-    "bg-amber-600",
-    "bg-teal-600",
-    "bg-cyan-600",
-  ];
-  const charCode = userName.trim().charCodeAt(0) || 0;
-  const bgColor = bgClasses[charCode % bgClasses.length];
+  useEffect(() => {
+    async function fetchHistory() {
+      if (!user) return;
+      try {
+        const q = query(
+          collection(db, "sos_sessions"),
+          or(
+            where("triggeredBy", "==", user.id),
+            where("responderUID", "==", user.id)
+          )
+        );
+        const snapshot = await getDocs(q);
+        const data = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        // Sort descending by startTime to avoid composite index requirement
+        data.sort((a, b) => {
+          const tA = a.startTime?.toMillis?.() || 0;
+          const tB = b.startTime?.toMillis?.() || 0;
+          return tB - tA;
+        });
+        
+        setSessions(data);
+      } catch (err) {
+        console.error("Error fetching history:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchHistory();
+  }, [user]);
 
-  const avatarHTML = isPlaceholder
-    ? `<div class="w-12 h-12 rounded-full flex items-center justify-center font-bold uppercase text-white ${bgColor} border border-white/10 shrink-0 select-none text-base">${initial}</div>`
-    : `<img alt="User Profile" class="w-12 h-12 rounded-full object-cover border border-gray-100" src="${avatarUrl}">`;
+  const formatDate = (timestamp) => {
+    if (!timestamp || !timestamp.toMillis) return "Unknown date";
+    return new Date(timestamp.toMillis()).toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  };
 
-  const dynamicHTML = HTML.replace(
-    '<img alt="User Profile" class="w-12 h-12 rounded-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBx1s7cKAePJFBmHojTu4cZFC5UuKj7jy18bCo1PM4SW_Vq5HYCCIWn0KyQnEhANOITgjZ26GcVwUeRHxoReatAnGazD1zxMKBI_VAR8nw3wmyMACxViNWxxjWKsY65vV9JapMbu3sUJ8E_GtOE9bhZVbsq_BDxFZWuatWbgXcZTrsz4dLzZ3Y_CsHGbVN-qt2bFi2MogcVI7L3uTSjiqjH2qo_WG1uJvJ8opyJqJ1uc15T-26Wlw-qNL4n_tMsUpUtWgG0AQUkufcK">',
-    avatarHTML,
-  ).replaceAll("User Name", userName);
+  const getStatusColor = (session) => {
+    if (session.status === "active") return "bg-red-500 border-red-200 animate-pulse";
+    if (session.status === "cancelled") return "bg-gray-500 border-gray-200";
+    return "bg-emerald-500 border-emerald-200";
+  };
+  
+  const getTextColor = (session) => {
+    if (session.status === "active") return "text-red-600";
+    if (session.status === "cancelled") return "text-gray-600";
+    return "text-emerald-700";
+  };
+
+  const getStatusTitle = (session) => {
+    const isResponder = session.responderUID === user.id;
+    if (isResponder) return "You Provided Assistance";
+    if (session.status === "active") return "SOS Currently Active";
+    if (session.status === "cancelled") return "SOS Cancelled";
+    return "SOS Resolved / Ended";
+  };
+
+  const getStatusDescription = (session) => {
+    const isResponder = session.responderUID === user.id;
+    if (isResponder) return `You successfully helped resolve an emergency alert.`;
+    if (session.status === "active") return `Alert escalated to Layer ${session.layerActive || 1}. Responders are being notified.`;
+    if (session.responderName) return `Assistance provided by ${session.responderName}.`;
+    return "Emergency broadcast was safely stood down.";
+  };
 
   return (
-    <HtmlPage
-      html={dynamicHTML}
-      className="bg-background text-on-background min-h-screen flex flex-col font-body-md antialiased md:flex-row overflow-x-hidden pb-20 md:pb-0"
-    />
+    <div className="bg-[#faf9fc] text-gray-900 min-h-screen flex flex-col antialiased pb-20 md:pb-0">
+      <main className="flex-grow w-full max-w-7xl mx-auto px-4 sm:px-6 py-6 md:pb-6 flex flex-col gap-6">
+        {/* Header */}
+        <div className="mb-2">
+          <h1 className="text-3xl font-extrabold text-gray-900 mb-2 tracking-tight">Safety History</h1>
+          <p className="text-sm text-gray-500">Review your historical safety tracking logs, active safe zones, and incident timelines.</p>
+        </div>
+
+        {/* Bento Stats Section */}
+        <section className="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <div className="bg-white rounded-2xl p-5 flex flex-col justify-between border border-gray-100 shadow-sm h-28 hover:-translate-y-0.5 transition-transform">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Total SOS Alerts</span>
+            <span className="text-3xl text-indigo-600 font-black">{sessions.filter(s => s.triggeredBy === user?.id).length}</span>
+          </div>
+          <div className="bg-white rounded-2xl p-5 flex flex-col justify-between border border-gray-100 shadow-sm h-28 hover:-translate-y-0.5 transition-transform">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Assisted Incidents</span>
+            <span className="text-3xl text-emerald-600 font-black">{sessions.filter(s => s.responderUID === user?.id).length}</span>
+          </div>
+          <div className="bg-white rounded-2xl p-5 flex flex-col justify-between border border-gray-100 shadow-sm h-28 hover:-translate-y-0.5 transition-transform col-span-2 md:col-span-1">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Days Protected</span>
+            <span className="text-3xl text-purple-600 font-black">24/7</span>
+          </div>
+        </section>
+
+        {/* Safety Timeline */}
+        <section className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm flex flex-col gap-6 mt-2">
+          <h2 className="text-lg font-bold text-gray-900 border-b border-gray-50 pb-3">Recent Incident Log</h2>
+          
+          <div className="flex flex-col gap-8 relative pl-6 before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-[2px] before:bg-gray-100">
+            
+            {loading && (
+              <div className="animate-pulse flex space-x-4 ml-2">
+                <div className="flex-1 space-y-4 py-1">
+                  <div className="h-2 bg-gray-200 rounded w-3/4"></div>
+                  <div className="space-y-2">
+                    <div className="h-2 bg-gray-200 rounded"></div>
+                    <div className="h-2 bg-gray-200 rounded w-5/6"></div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!loading && sessions.length === 0 && (
+              <div className="text-sm text-gray-500 ml-2 italic">No past SOS incidents found in your history. You've been safe!</div>
+            )}
+
+            {!loading && sessions.map((session, i) => (
+              <div key={session.id} className="relative flex flex-col gap-1.5 hover:bg-gray-50 p-3 -ml-3 rounded-xl transition-colors group">
+                {/* Timeline Dot */}
+                <span className={`absolute left-[-15px] top-4 w-3.5 h-3.5 rounded-full border-[3px] border-white shadow-sm ${getStatusColor(session)}`}></span>
+                
+                <div className="flex justify-between items-start">
+                  <h3 className={`text-sm font-bold ${getTextColor(session)}`}>{getStatusTitle(session)}</h3>
+                  <span className="text-[11px] font-semibold text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full">{formatDate(session.startTime)}</span>
+                </div>
+                <p className="text-xs text-gray-600 leading-relaxed max-w-[90%]">
+                  {getStatusDescription(session)}
+                </p>
+                <div className="flex gap-2 mt-2">
+                  <span className="text-[10px] font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded-md">ID: {session.id.slice(0,6)}...</span>
+                  {session.layerActive && (
+                     <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 px-2 py-1 rounded-md">Layer {session.layerActive}</span>
+                  )}
+                </div>
+              </div>
+            ))}
+            
+            {!loading && sessions.length > 0 && (
+              <div className="relative flex flex-col gap-1 ml-2 mt-2">
+                 <span className="absolute -left-[27px] top-1.5 w-3 h-3 rounded-full bg-gray-200 border-2 border-white"></span>
+                 <p className="text-xs text-gray-400 italic">End of history</p>
+              </div>
+            )}
+          </div>
+        </section>
+      </main>
+    </div>
   );
 }

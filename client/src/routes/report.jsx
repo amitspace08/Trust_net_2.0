@@ -40,7 +40,7 @@ function ReportPage() {
         </Link>
         <h1 className="text-base font-semibold flex-1">Report incident</h1>
       </header>
-      <form onSubmit={submit} className="max-w-md md:max-w-2xl mx-auto p-4 flex flex-col gap-5">
+      <form onSubmit={submit} className="max-w-md md:max-w-5xl mx-auto p-4 flex flex-col gap-5">
         <div>
           <p className="text-sm font-medium text-gray-700 mb-2">Type</p>
           <div className="grid grid-cols-3 gap-2">

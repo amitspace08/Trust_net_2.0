@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../lib/auth";
 import { stopSharing, updateMyLocation } from "../services/locationService";
 import { UserAvatar } from "../components/ui/UserAvatar";
+import { collection, query, where, onSnapshot, getDoc, doc } from "firebase/firestore";
+import { db } from "../firebase/firebase";
 
 export const Route = createFileRoute("/profile")({
   head: () => ({
@@ -17,6 +19,8 @@ function ProfilePage() {
   const router = useRouter();
   const [sharingLocation, setSharingLocation] = useState(true);
   const [isGuardianAngel, setIsGuardianAngel] = useState(false);
+  const [contacts, setContacts] = useState([]);
+  const [trustScore, setTrustScore] = useState(70);
 
   // Photo editing state
   const [editingPhoto, setEditingPhoto] = useState(false);
@@ -29,13 +33,10 @@ function ProfilePage() {
     if (!url) return;
     setPhotoSaving(true);
     try {
-      // Update Firestore
-      const { getFirestore, doc, updateDoc } = await import("firebase/firestore");
       if (user?.id) {
-        const db = getFirestore();
+        const { updateDoc, doc } = await import("firebase/firestore");
         await updateDoc(doc(db, "users", user.id), { photoURL: url, profile_photo: url });
       }
-      // Update localStorage session
       const raw = localStorage.getItem("trustnet_auth_user");
       if (raw) {
         const parsed = JSON.parse(raw);
@@ -53,18 +54,49 @@ function ProfilePage() {
     setPhotoSaving(false);
   };
 
-  // Check Guardian Angel registration status
+  // Fetch Real Profile Data (Contacts, Score, Guardian Status)
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("trustnet_guardian_profile");
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        setIsGuardianAngel(parsed.registered === true);
+    if (!user) return;
+
+    // Listen to real-time user doc for Guardian status
+    const unsubUser = onSnapshot(doc(db, "users", String(user.id)), (snap) => {
+      if (snap.exists()) {
+        setIsGuardianAngel(snap.data().isGuardianAngel === true);
       }
-    } catch {
-      /* fallback */
-    }
-  }, []);
+    });
+
+    // Fetch real trusted contacts
+    const qAccepted = query(
+      collection(db, "trust_relationships"),
+      where("status", "==", "accepted")
+    );
+    const unsubContacts = onSnapshot(qAccepted, async (snapshot) => {
+      const list = [];
+      for (const d of snapshot.docs) {
+        const data = d.data();
+        if (data.userA === user.id || data.userB === user.id) {
+          const partnerId = data.userA === user.id ? data.userB : data.userA;
+          const userRef = doc(db, "users", partnerId);
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists()) {
+            const uData = userSnap.data();
+            list.push({
+              id: partnerId,
+              name: uData.name || uData.displayName || "Contact",
+              avatar: uData.avatar || uData.profile_photo || ""
+            });
+          }
+        }
+      }
+      setContacts(list);
+      setTrustScore(Math.min(99, 70 + (list.length * 5)));
+    });
+
+    return () => {
+      unsubUser();
+      unsubContacts();
+    };
+  }, [user]);
 
   // Sync state with localStorage
   useEffect(() => {
@@ -217,9 +249,9 @@ function ProfilePage() {
                 </p>
               </div>
               <div className="text-right">
-                <span className="text-3xl font-extrabold text-[#0d631b] block">98</span>
+                <span className="text-3xl font-extrabold text-[#0d631b] block">{trustScore}</span>
                 <span className="text-[10px] font-bold text-[#0d631b] bg-[#0d631b]/10 px-2 py-0.5 rounded-full mt-1 inline-block">
-                  Excellent
+                  {trustScore >= 90 ? "Excellent" : trustScore >= 80 ? "Great" : "Good"}
                 </span>
               </div>
             </div>
@@ -232,8 +264,8 @@ function ProfilePage() {
               <div className="w-full bg-[#0d631b]/40 rounded-t-sm" style={{ height: "65%" }}></div>
               <div className="w-full bg-[#0d631b]/70 rounded-t-sm" style={{ height: "90%" }}></div>
               <div
-                className="w-full bg-[#0d631b] rounded-t-sm shadow-sm"
-                style={{ height: "98%" }}
+                className="w-full bg-[#0d631b] rounded-t-sm shadow-sm transition-all duration-1000"
+                style={{ height: `${trustScore}%` }}
               ></div>
             </div>
           </div>
@@ -320,24 +352,34 @@ function ProfilePage() {
               </p>
             </div>
             <div className="mt-auto pt-2 flex -space-x-1.5">
-              <div className="w-7 h-7 rounded-full bg-gray-150 border-2 border-white flex items-center justify-center text-[9px] font-bold text-gray-600">
-                JD
-              </div>
-              <div className="w-7 h-7 rounded-full bg-blue-100 border-2 border-white flex items-center justify-center text-[9px] font-bold text-blue-600">
-                MR
-              </div>
-              <div className="w-7 h-7 rounded-full bg-green-100 border-2 border-white flex items-center justify-center text-[9px] font-bold text-[#0d631b]">
-                AL
-              </div>
-              <div className="w-7 h-7 rounded-full bg-gray-50 border-2 border-white flex items-center justify-center text-xs text-gray-400">
-                <span className="material-symbols-outlined text-xs">add</span>
-              </div>
+              {contacts.slice(0, 3).map((c, i) => (
+                <div key={c.id || i} className="w-7 h-7 rounded-full border-2 border-white overflow-hidden shadow-sm">
+                  <UserAvatar
+                    name={c.name}
+                    avatarUrl={c.avatar}
+                    sizeClassName="w-full h-full text-[9px] font-bold"
+                  />
+                </div>
+              ))}
+              {contacts.length > 3 && (
+                <div className="w-7 h-7 rounded-full bg-gray-150 border-2 border-white flex items-center justify-center text-[9px] font-bold text-gray-600 shadow-sm z-10">
+                  +{contacts.length - 3}
+                </div>
+              )}
+              {contacts.length === 0 && (
+                <div className="w-7 h-7 rounded-full bg-gray-50 border-2 border-white flex items-center justify-center text-xs text-gray-400 shadow-sm">
+                  <span className="material-symbols-outlined text-xs">add</span>
+                </div>
+              )}
             </div>
           </Link>
 
           {/* Alert Preferences */}
-          <div className="col-span-1 md:col-span-6 lg:col-span-4 bg-white border border-gray-200 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
-            <div className="w-12 h-12 bg-gray-50 text-gray-600 rounded-full flex items-center justify-center">
+          <Link
+            to="/settings"
+            className="col-span-1 md:col-span-6 lg:col-span-4 bg-white border border-gray-200 rounded-2xl p-5 shadow-sm flex flex-col gap-4 hover:border-gray-300 transition group"
+          >
+            <div className="w-12 h-12 bg-gray-50 text-gray-600 rounded-full flex items-center justify-center group-hover:scale-105 transition-transform">
               <span className="material-symbols-outlined text-xl">notifications_active</span>
             </div>
             <div>
@@ -345,12 +387,24 @@ function ProfilePage() {
               <p className="text-xs text-gray-500 mt-1">Manage push, SMS, and email alerts.</p>
             </div>
             <div className="mt-auto pt-2 flex items-center justify-between">
-              <span className="text-xs text-gray-500">All Alerts On</span>
-              <span className="material-symbols-outlined text-[#0d631b] text-sm">
+              <span className="text-xs text-gray-500">{
+                (() => {
+                  try {
+                    const raw = localStorage.getItem("trustnet_prefs");
+                    if (raw) {
+                       const p = JSON.parse(raw);
+                       if (p.notifyIncidents === false && p.notifyCircle === false) return "All Alerts Off";
+                       if (p.notifyIncidents === false || p.notifyCircle === false) return "Custom Alerts";
+                    }
+                  } catch {}
+                  return "All Alerts On";
+                })()
+              }</span>
+              <span className="material-symbols-outlined text-[#0d631b] text-sm group-hover:translate-x-0.5 transition-transform">
                 arrow_forward
               </span>
             </div>
-          </div>
+          </Link>
 
           {/* Guardian Angel Card */}
           <Link
@@ -372,14 +426,14 @@ function ProfilePage() {
                 </h3>
                 <p className="text-xs text-white/80 mt-0.5">
                   {isGuardianAngel
-                    ? "Manage your availability and response history"
-                    : "Volunteer to respond to nearby Layer 3 SOS alerts"}
+                    ? "Manage your availability and respond to emergencies."
+                    : "Volunteer to respond to nearby Layer 3 SOS alerts."}
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {isGuardianAngel && (
-                <span className="text-[9px] font-bold bg-white/20 text-white px-2 py-0.5 rounded-full">
+                <span className="text-[9px] font-bold bg-white/20 text-white px-2 py-0.5 rounded-full border border-white/40">
                   REGISTERED
                 </span>
               )}

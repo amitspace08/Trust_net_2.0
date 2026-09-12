@@ -200,7 +200,7 @@ function SafeSpacesPage() {
       </header>
 
       {/* Main */}
-      <main className="flex-grow w-full max-w-2xl mx-auto px-4 py-5 md:ml-72 pb-28 md:pb-8 flex flex-col gap-5">
+      <main className="flex-grow w-full max-w-5xl mx-auto px-4 py-5  pb-28 md:pb-8 flex flex-col gap-5">
         {/* Tab bar */}
         <div className="flex bg-white border border-gray-200 rounded-2xl p-1 shadow-sm gap-1">
           {["list", "register"].map((t) => (
@@ -448,15 +448,19 @@ function SafeSpacesPage() {
                 </div>
 
                 {/* Navigate button */}
-                <a
-                  href={`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=walking`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <Link
+                  to="/heatmap"
+                  search={{
+                    targetLat: s.lat,
+                    targetLng: s.lng,
+                    targetName: s.name,
+                    targetRelation: "Safe Space"
+                  }}
                   className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl flex items-center justify-center gap-2 text-sm transition active:scale-[0.98] shadow-lg"
                 >
                   <span className="material-symbols-outlined text-xl">directions_walk</span>
                   Navigate — Walking Directions
-                </a>
+                </Link>
               </div>
             );
           })()}

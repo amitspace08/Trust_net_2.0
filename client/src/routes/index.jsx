@@ -57,6 +57,32 @@ function HomePage() {
   };
 
   useEffect(() => {
+    // If there's an active SOS session, forcefully redirect to /sos to keep them on the emergency map
+    const activeSession = localStorage.getItem("trustnet_active_sos_session");
+    if (activeSession) {
+      router.navigate({ to: "/sos", replace: true });
+      return;
+    }
+
+    // If there's an active RESPONSE session, redirect them back to the responder screen
+    const activeResponse = localStorage.getItem("trustnet_active_response_session");
+    if (activeResponse) {
+      try {
+        const { sessionId, role } = JSON.parse(activeResponse);
+        if (sessionId) {
+          router.navigate({
+            to: "/sos-receiver",
+            search: { sessionId, role: role || "layer1" },
+            replace: true
+          });
+        }
+      } catch (e) {
+        console.error("Failed to parse response session", e);
+      }
+    }
+  }, [router]);
+
+  useEffect(() => {
     return () => {
       if (holdTimerRef.current) cancelAnimationFrame(holdTimerRef.current);
     };
@@ -68,7 +94,7 @@ function HomePage() {
   return (
     <div className="w-full min-h-screen relative flex flex-col md:flex-row pb-24 md:pb-0 bg-[#faf9fc]">
       {/* Main Canvas */}
-      <main className="flex-1 w-full max-w-4xl mx-auto px-4 py-6 md:ml-72 pb-24 md:pb-6 flex flex-col gap-6">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-6  pb-24 md:pb-6 flex flex-col gap-6">
         {/* Welcome Header */}
         <div className="flex justify-between items-center">
           <div>

@@ -7,6 +7,7 @@ import {
   getSOS,
   acknowledgeLayer2,
   declineLayer2,
+  archiveSOS,
 } from "../controllers/sosController.js";
 import { protect } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
@@ -21,6 +22,7 @@ const triggerSchema = z.object({
   }),
 });
 
+router.post("/archive", archiveSOS); // Used by Firebase Cloud Functions, might want an API key here later
 router.post("/trigger", protect, validate(triggerSchema), triggerSOS);
 router.post("/:sessionId/cancel", protect, cancelSOS);
 router.post("/:sessionId/acknowledge", protect, acknowledgeSOS);

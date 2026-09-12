@@ -6,10 +6,36 @@ import {
   acknowledgeSOS,
   declineLayer2,
   listenSOS,
+  endSOS,
 } from "../services/sosService";
 import { subscribeToLiveSOSLocation, updateMyLocation } from "../services/locationService";
 import { useAuth } from "../lib/auth";
 import { UserAvatar } from "../components/ui/UserAvatar";
+
+import { MapContainer, TileLayer, Marker, Polyline, Circle, Popup, Tooltip, useMap } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+
+function MapResizer() {
+  const map = useMap();
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [map]);
+  return null;
+}
+
+function FlyToBounds({ bounds }) {
+  const map = useMap();
+  useEffect(() => {
+    if (bounds) {
+      map.fitBounds(bounds, { padding: [50, 50], animate: true, duration: 1.2 });
+    }
+  }, [bounds, map]);
+  return null;
+}
 
 export const Route = createFileRoute("/sos-receiver")({
   validateSearch: (search) => {
@@ -35,9 +61,22 @@ function SosReceiverPage() {
   const search = useSearch({ from: "/sos-receiver" });
   const sessionId = search.sessionId;
 
-  const [receiverState, setReceiverState] = useState("alert");
+  const [receiverState, setReceiverState] = useState(() => {
+    try {
+      const activeResp = localStorage.getItem("trustnet_active_response_session");
+      if (activeResp) {
+        const parsed = JSON.parse(activeResp);
+        if (parsed.sessionId === sessionId) return "responding";
+      }
+    } catch (e) {}
+    return "alert";
+  });
+  
   const [eta, setEta] = useState(6);
   const [distance, setDistance] = useState(0.85);
+  const [routePolyline, setRoutePolyline] = useState(null);
+  const [mapBounds, setMapBounds] = useState(null);
+  const [isRouting, setIsRouting] = useState(false);
 
   // Tracking SOS status and layer information
   const [sosStatus, setSosStatus] = useState("active");
@@ -54,6 +93,10 @@ function SosReceiverPage() {
   // Load responder profile or default
   const [responderUID, setResponderUID] = useState("ga_jaipur_1");
 
+  const distressName = distressedUser?.name || distressedUser?.displayName || "Someone";
+  const distressFirstName = distressName.split(" ")[0];
+  const distressPhone = distressedUser?.phone || distressedUser?.phone_no || "";
+
   useEffect(() => {
     try {
       const authRaw = localStorage.getItem("trustnet_auth_user");
@@ -63,10 +106,47 @@ function SosReceiverPage() {
           setResponderUID(parsed.id);
         }
       }
-    } catch {
+  } catch {
       // Fallback
     }
   }, []);
+
+  const getAvatarIcon = (url, name, borderColor) => {
+    return L.divIcon({
+      className: "custom-avatar-marker",
+      html: `<div style="width:48px;height:48px;border-radius:50%;overflow:hidden;border:4px solid ${borderColor};box-shadow:0 4px 8px rgba(0,0,0,0.5);background:white;display:flex;align-items:center;justify-content:center;font-weight:bold;color:#333;font-size:18px"><img src="${url || ''}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'" />${!url ? name.charAt(0) : ''}</div>`,
+      iconSize: [48, 48],
+      iconAnchor: [24, 24],
+    });
+  };
+
+  const calculateRoute = async (targetLat, targetLng) => {
+    if (!responderLoc || !targetLat || !targetLng) return;
+    setIsRouting(true);
+    try {
+      const origin = { lat: responderLoc.lat, lng: responderLoc.lng };
+      const dest = { lat: targetLat, lng: targetLng };
+      const res = await fetch(
+        `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${dest.lng},${dest.lat}?overview=full&geometries=geojson`,
+      );
+      const data = await res.json();
+      if (data.routes && data.routes.length > 0) {
+        const route = data.routes[0];
+        const latLngs = route.geometry.coordinates.map((coord) => [coord[1], coord[0]]);
+        setRoutePolyline(latLngs);
+        setDistance((route.distance / 1000).toFixed(2));
+        setEta(Math.ceil(route.duration / 60));
+
+        const bounds = L.latLngBounds([origin.lat, origin.lng], [dest.lat, dest.lng]);
+        setMapBounds(bounds);
+      }
+    } catch (err) {
+      console.error("Failed to calculate route:", err);
+    }
+    setIsRouting(false);
+  };
+
+
 
   // Watch responder's current location continuously
   useEffect(() => {
@@ -110,7 +190,16 @@ function SosReceiverPage() {
   useEffect(() => {
     if (!sessionId) return;
     return listenSOS(sessionId, async (session) => {
-      if (session.status !== "active") setSosStatus("ended");
+      if (session.status === "ended" || session.status === "cancelled" || session.status === "resolved" || session.active === false) {
+        setSosStatus("ended");
+      }
+      
+      // If someone else already claimed it
+      if (session.responderUID && session.responderUID !== responderUID) {
+        setSosStatus("already_accepted");
+        setReceiverState("already_accepted");
+      }
+
       if (session.layerActive) setSosLayer(session.layerActive);
 
       if (session.triggeredBy) {
@@ -126,7 +215,7 @@ function SosReceiverPage() {
         }
       }
     });
-  }, [sessionId]);
+  }, [sessionId, responderUID]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -247,7 +336,17 @@ function SosReceiverPage() {
 
   // Dynamically update distance & ETA based on real GPS coordinates
   useEffect(() => {
-    if (liveLocation && responderLoc) {
+    if (receiverState === "responding") {
+      const dLat = liveLocation?.latitude ?? 28.6139;
+      const dLng = liveLocation?.longitude ?? 77.209;
+      
+      const showFuzzy = (isLayer2 || isLayer3) && receiverState !== "responding";
+      const fuzzy = getFuzzyOffset(dLat, dLng, sessionId || "default");
+      const targetLat = showFuzzy ? fuzzy.lat : dLat;
+      const targetLng = showFuzzy ? fuzzy.lng : dLng;
+      
+      calculateRoute(targetLat, targetLng);
+    } else if (liveLocation && responderLoc) {
       const dLat = liveLocation.latitude ?? 28.6139;
       const dLng = liveLocation.longitude ?? 77.209;
       const rLat = responderLoc.lat;
@@ -257,13 +356,37 @@ function SosReceiverPage() {
       const nextEta = Math.max(1, Math.ceil(dist * 12)); // ~12 mins per km
       setEta(nextEta);
     }
+  }, [liveLocation, responderLoc, receiverState, isLayer2, isLayer3, sessionId]);
+
+  // Ensure map bounds always include both pins, even if route API fails
+  useEffect(() => {
+    if (liveLocation && responderLoc) {
+      let rLat = responderLoc.lat;
+      let rLng = responderLoc.lng;
+      let dLat = liveLocation.latitude ?? 28.6139;
+      let dLng = liveLocation.longitude ?? 77.209;
+      
+      if (Math.abs(rLat - dLat) < 0.0001 && Math.abs(rLng - dLng) < 0.0001) {
+        // Add tiny padding if coordinates are identical to prevent Leaflet from max-zooming
+        rLat += 0.001;
+        dLat -= 0.001;
+      }
+      setMapBounds(L.latLngBounds([dLat, dLng], [rLat, rLng]));
+    }
   }, [liveLocation, responderLoc]);
 
-  // Precalculate exact map percentage positions
+
   const distressLat = liveLocation?.latitude ?? 28.6139;
   const distressLng = liveLocation?.longitude ?? 77.209;
-  const responderLat = responderLoc?.lat ?? 28.6145;
-  const responderLng = responderLoc?.lng ?? 77.2085;
+  
+  let responderLat = responderLoc?.lat ?? 28.6145;
+  let responderLng = responderLoc?.lng ?? 77.2085;
+
+  // Add a tiny visual offset if they are perfectly overlapping so both pins are visible
+  if (Math.abs(responderLat - distressLat) < 0.0001 && Math.abs(responderLng - distressLng) < 0.0001) {
+    responderLat += 0.0005;
+    responderLng += 0.0005;
+  }
 
   const distressPosExact = getMapPosition(distressLat, distressLng);
 
@@ -295,6 +418,12 @@ function SosReceiverPage() {
       else if (isLayer3) await acknowledgeLayer3(sessionId, responderUID);
       else await acknowledgeSOS(sessionId, responderUID);
       console.log("Firebase: Acknowledged Layer 3 Alert");
+
+      // Save active response session to prevent redirect map resets
+      localStorage.setItem(
+        "trustnet_active_response_session",
+        JSON.stringify({ sessionId, role: search.role })
+      );
 
       // Update local storage so checkResponder updates local states if needed
       const raw = localStorage.getItem("trustnet_sos_state");
@@ -336,12 +465,38 @@ function SosReceiverPage() {
     }
 
     setTimeout(() => {
+      localStorage.removeItem("trustnet_active_response_session");
       router.navigate({ to: "/" });
-    }, 2500);
+    }, 4000);
   };
 
+  // Mark distressed person as secure and end the SOS session globally
+  const handleMarkSecure = async () => {
+    try {
+      if (!sessionId) throw new Error("This alert has no SOS session");
+      
+      // We will let the user know we're marking it safe
+      const confirmSafe = window.confirm(`Are you sure you want to mark ${distressFirstName} as safe and end the SOS broadcast?`);
+      if (!confirmSafe) return;
+      
+      await endSOS(sessionId);
+      console.log("Firebase: Marked SOS as secure by responder");
+      
+      // Cleanup local state
+      localStorage.removeItem("trustnet_sos_state");
+      localStorage.removeItem("trustnet_active_response_session");
+      
+      setSosStatus("ended");
+      setReceiverState("thankyou");
+    } catch (err) {
+      console.error("Firebase mark secure failed:", err);
+    }
+  };
+
+  // Clear URL params and return home
   const handleCleanEndedState = () => {
     localStorage.removeItem("trustnet_sos_state");
+    localStorage.removeItem("trustnet_active_response_session");
     router.navigate({ to: "/" });
   };
 
@@ -410,7 +565,9 @@ function SosReceiverPage() {
           </div>
           <div>
             <h1 className="text-xl font-black text-gray-900 tracking-tight">
-              Priya has marked herself safe.
+              {receiverState === "thankyou" 
+                ? `You marked ${distressFirstName} as safe.` 
+                : `${distressFirstName} has marked themselves safe.`}
             </h1>
             <p className="text-sm text-gray-500 font-semibold mt-1">Thank you for responding.</p>
           </div>
@@ -425,6 +582,39 @@ function SosReceiverPage() {
           <button
             onClick={handleCleanEndedState}
             className="w-full bg-[#0d631b] hover:bg-[#0a5215] text-white font-bold py-4 rounded-xl shadow-md transition active:scale-[0.98] flex items-center justify-center gap-2"
+          >
+            <span className="material-symbols-outlined text-lg">home</span>
+            Return to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── RENDER ALREADY ACCEPTED BY OTHER ──
+  if (receiverState === "already_accepted" || sosStatus === "already_accepted") {
+    return (
+      <div className="w-full min-h-screen bg-[#faf9fc] flex flex-col justify-between items-center p-6 text-gray-800 select-none animate-fade-in">
+        <div className="flex-grow flex flex-col items-center justify-center max-w-sm mx-auto text-center gap-6">
+          <div className="w-20 h-20 rounded-full bg-blue-100 border-2 border-blue-500 text-blue-600 flex items-center justify-center shadow-lg animate-scale-in">
+            <span className="material-symbols-outlined text-4xl font-black">handshake</span>
+          </div>
+          <div>
+            <h1 className="text-xl font-black text-gray-900 tracking-tight">
+              Helped by another responder
+            </h1>
+            <p className="text-sm text-gray-500 font-semibold mt-1">Thank you for being ready.</p>
+          </div>
+          <div className="bg-white border border-gray-150 rounded-2xl p-5 shadow-sm">
+            <p className="text-xs text-gray-655 leading-relaxed">
+              Another member of the TrustNet network has already accepted this SOS and is en route to {distressFirstName}. Your assistance is no longer required.
+            </p>
+          </div>
+        </div>
+        <div className="w-full max-w-md pb-8">
+          <button
+            onClick={handleCleanEndedState}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-md transition active:scale-[0.98] flex items-center justify-center gap-2"
           >
             <span className="material-symbols-outlined text-lg">home</span>
             Return to Dashboard
@@ -458,17 +648,104 @@ function SosReceiverPage() {
       </header>
 
       {/* Main Map Area */}
-      <main className="flex-grow relative w-full md:ml-72 h-[calc(100vh-4rem)] md:h-screen bg-gray-200 overflow-hidden flex flex-col">
-        {/* Full Screen Map Background */}
-        <div className="absolute inset-0 w-full h-full">
-          <img
-            alt="City Map"
-            className="w-full h-full object-cover brightness-[0.7] contrast-[1.1]"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuCc5fg68OpWf72lAUfE0tDH7yk9rYFKbMyj79SG0VknavzL2u6XozKcTTGrgiBlqtSI330GAhhThg2uh3HVCn09EcagPMNkvsLA1xSzhrW17M0gDS88RkxYEMFHHjeLCEeOA73T4OY6-iuZ85rg81lDb4kUydqvnYIdfY2KbZQ8zoRNubvbGyuifD01nbH65Fq-yYh9vAFmiPtG2XbpURPKyCbzU9DK4DOhvU1HJOkbmTH_TGeUSb2nkl7jlSzb8-9R2pHg35gk0CvS"
-          />
+      <main className="flex-grow relative w-full  h-[calc(100vh-4rem)] md:h-screen bg-gray-200 overflow-hidden flex flex-col">
+        {/* Real Leaflet Map */}
+        <div className="absolute inset-0 w-full h-full z-0">
+          <MapContainer
+            center={[distressLat, distressLng]}
+            zoom={15}
+            zoomControl={false}
+            style={{ height: "100%", width: "100%" }}
+          >
+            <MapResizer />
+            {mapBounds && <FlyToBounds bounds={mapBounds} />}
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            
+            {/* Distressed User Pin */}
+            <Marker 
+              position={showFuzzy ? [fuzzyCoords.lat, fuzzyCoords.lng] : [distressLat, distressLng]}
+              zIndexOffset={1000}
+              icon={getAvatarIcon(
+                distressedUser?.avatar || distressedUser?.profile_photo || "",
+                distressName,
+                isLayer3 ? "#f59e0b" : isLayer2 ? "#4f46e5" : "#ef4444"
+              )}
+            >
+              <Tooltip permanent direction="top" offset={[0, -20]} className="font-bold">
+                {distressName}
+              </Tooltip>
+              <Popup>
+                <div className="font-bold text-xs">{distressName}</div>
+                <div className="text-[10px] text-gray-500">
+                  {isLayer3 ? "Guardian Alert" : isLayer2 ? `Friend of ${mutualContactName}` : "Trusted Contact"}
+                </div>
+                {receiverState === "responding" && distance > 0 && (
+                  <div className="text-xs font-bold text-blue-600 mt-1">
+                    {distance} km away (~{eta} min)
+                  </div>
+                )}
+              </Popup>
+            </Marker>
+
+            {/* Fuzzy Radius for Privacy Modes */}
+            {showFuzzy && (
+              <Circle
+                center={[fuzzyCoords.lat, fuzzyCoords.lng]}
+                radius={200}
+                pathOptions={{ 
+                  color: isLayer3 ? "#f59e0b" : "#4f46e5", 
+                  fillColor: isLayer3 ? "#f59e0b" : "#4f46e5", 
+                  fillOpacity: 0.1, 
+                  weight: 2,
+                  dashArray: "4,4"
+                }}
+              />
+            )}
+
+            {/* Responder Pin */}
+            {responderLoc && (
+              <Marker
+                position={[responderLat, responderLng]}
+                zIndexOffset={500}
+                icon={L.divIcon({
+                  className: "custom-avatar-marker",
+                  html: `<div style="width:40px;height:40px;border-radius:50%;border:3px solid white;box-shadow:0 3px 6px rgba(0,0,0,0.4);background:${isLayer3 ? '#f59e0b' : isLayer2 ? '#4f46e5' : '#2563eb'};display:flex;align-items:center;justify-content:center;color:white;"><span class="material-symbols-outlined" style="font-size:20px;font-variation-settings:'FILL' 1;">directions_run</span></div>`,
+                  iconSize: [40, 40],
+                  iconAnchor: [20, 20],
+                })}
+              >
+                <Tooltip permanent direction="top" offset={[0, -20]} className="font-bold">
+                  {user?.displayName || user?.name || "You"} (You)
+                </Tooltip>
+              </Marker>
+            )}
+
+            {/* Route Polyline (OSRM or straight line fallback) */}
+            {routePolyline ? (
+              <Polyline 
+                positions={routePolyline} 
+                color={isLayer3 ? "#f59e0b" : isLayer2 ? "#4f46e5" : "#2563eb"} 
+                weight={6} 
+                opacity={0.8} 
+              />
+            ) : (
+              receiverState === "responding" && responderLoc && (
+                <Polyline 
+                  positions={[
+                    [distressLat, distressLng],
+                    [responderLat, responderLng]
+                  ]} 
+                  pathOptions={{ color: isLayer3 ? "#f59e0b" : isLayer2 ? "#4f46e5" : "#2563eb", weight: 4, dashArray: "10,10" }} 
+                />
+              )
+            )}
+          </MapContainer>
         </div>
 
-        {/* SOS Alert HUD banner — distinct for each layer */}
+        {/* SOS Alert HUD banner */}
         <div className="absolute top-4 left-4 right-4 z-20 flex flex-col gap-3 pointer-events-none">
           <div
             className={`text-white rounded-2xl shadow-xl p-4 flex gap-3 items-center pointer-events-auto max-w-lg mx-auto w-full border ${
@@ -498,107 +775,10 @@ function SosReceiverPage() {
                   ? `Someone nearby needs urgent help (approximately 400m from you)`
                   : isLayer2
                     ? `A friend of ${mutualContactName} needs help nearby (approximately 300m from you)`
-                    : `${distressedUser?.name || distressedUser?.displayName || "Someone"} has triggered an SOS alert!`}
+                    : `${distressName} has triggered an SOS alert!`}
               </p>
             </div>
           </div>
-        </div>
-
-        {/* Distressed User Pin (Priya Sharma) - Fuzzy Map for Layer 2 & Layer 3 privacy (Task 1 S3.2) */}
-        {showFuzzy ? (
-          <>
-            {/* Transparent Circular Area showing 200m Privacy Radius */}
-            <div
-              style={{ top: `${distressPos.top}%`, left: `${distressPos.left}%` }}
-              className={`absolute z-10 w-36 h-36 -ml-18 -mt-18 rounded-full border-2 bg-opacity-10 pointer-events-none animate-pulse ${
-                isLayer3 ? "border-amber-500 bg-amber-500/10" : "border-indigo-500 bg-indigo-500/10"
-              }`}
-            >
-              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 whitespace-nowrap bg-black/60 text-[9px] text-white px-2 py-0.5 rounded font-bold font-sans uppercase">
-                Approximate location — privacy mode
-              </div>
-            </div>
-            {/* Fuzzy offset avatar */}
-            <div
-              style={{ top: `${distressPos.top + 2}%`, left: `${distressPos.left - 2}%` }}
-              className={`absolute z-20 w-11 h-11 -ml-5.5 -mt-5.5 rounded-full border-4 bg-white shadow-lg flex items-center justify-center pointer-events-none ${
-                isLayer3 ? "border-amber-400" : "border-indigo-400"
-              }`}
-            >
-              <UserAvatar
-                name={distressedUser?.name || distressedUser?.displayName || "Someone"}
-                avatarUrl={distressedUser?.avatar || distressedUser?.profile_photo}
-                sizeClassName="w-full h-full text-xs font-semibold"
-              />
-            </div>
-          </>
-        ) : (
-          /* Layer 1 Exact Tracking Pin & Post-Response Layer 3 Pin */
-          <div
-            style={{ top: `${distressPos.top}%`, left: `${distressPos.left}%` }}
-            className={`absolute z-20 w-12 h-12 -ml-6 -mt-6 rounded-full border-4 bg-white shadow-2xl flex items-center justify-center pointer-events-none ${
-              isLayer3 ? "border-amber-500" : "border-red-500"
-            }`}
-          >
-            <UserAvatar
-              name={distressedUser?.name || distressedUser?.displayName || "Someone"}
-              avatarUrl={distressedUser?.avatar || distressedUser?.profile_photo}
-              sizeClassName="w-full h-full text-xs font-semibold animate-pulse"
-            />
-
-            <span
-              className={`absolute inset-0 rounded-full border-4 animate-ping opacity-35 ${
-                isLayer3 ? "border-amber-600" : "border-red-600"
-              }`}
-            />
-          </div>
-        )}
-
-        {/* SVG Route Line between Responder and Distressed User when responding (Task 1 S3.3) */}
-        {receiverState === "responding" && (
-          <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
-            <line
-              x1={`${responderPos.left}%`}
-              y1={`${responderPos.top}%`}
-              x2={`${distressPos.left}%`}
-              y2={`${distressPos.top}%`}
-              stroke={isLayer3 ? "#f59e0b" : "#3b82f6"}
-              strokeWidth="3.5"
-              strokeDasharray="6,6"
-            />
-          </svg>
-        )}
-
-        {/* Responder Pin (Moving GPS pin) */}
-        <div
-          style={{ top: `${responderPos.top}%`, left: `${responderPos.left}%` }}
-          className={`absolute z-20 w-10 h-10 -ml-5 -mt-5 rounded-full border-2 bg-white shadow-xl flex items-center justify-center transition-all duration-1000 ease-out pointer-events-none ${
-            isLayer3 ? "border-amber-500" : isLayer2 ? "border-indigo-500" : "border-blue-500"
-          }`}
-        >
-          <div
-            className={`w-full h-full rounded-full flex items-center justify-center font-extrabold text-sm ${
-              isLayer3
-                ? "bg-amber-50 text-amber-600"
-                : isLayer2
-                  ? "bg-indigo-55 text-indigo-700"
-                  : "bg-blue-100 text-blue-600"
-            }`}
-          >
-            <span
-              className="material-symbols-outlined text-lg"
-              style={{ fontVariationSettings: "'FILL' 1" }}
-            >
-              directions_run
-            </span>
-          </div>
-          {receiverState === "responding" && (
-            <span
-              className={`absolute inset-0 rounded-full border-2 animate-ping opacity-25 ${
-                isLayer3 ? "border-amber-500" : isLayer2 ? "border-indigo-500" : "border-blue-500"
-              }`}
-            />
-          )}
         </div>
 
         {/* HUD Details & Action Panel */}
@@ -644,7 +824,7 @@ function SosReceiverPage() {
                     <span
                       className={`w-2.5 h-2.5 rounded-full animate-pulse ${isLayer3 ? "bg-amber-500" : isLayer2 ? "bg-indigo-600" : "bg-blue-600"}`}
                     ></span>
-                    En Route to Priya
+                    En Route to {distressFirstName}
                   </h3>
                   <p className="text-[11px] text-gray-550 mt-0.5">
                     Simulated response navigation active
@@ -664,49 +844,31 @@ function SosReceiverPage() {
 
               <hr className="border-gray-150" />
 
-              {isLayer3 ? (
-                /* Post-Response directions for Layer 3 GA */
-                <div className="bg-amber-50/70 border border-amber-100 rounded-xl p-3 flex gap-2.5 items-start">
-                  <span className="material-symbols-outlined text-amber-600 text-lg mt-0.5 font-bold">
-                    navigation
-                  </span>
-                  <div>
-                    <h4 className="font-bold text-xs text-amber-900">Guardian Directions</h4>
-                    <p className="text-[10px] text-amber-900/80 leading-relaxed mt-0.5 font-sans">
-                      Go straight for 200m, then take the first right onto MG Road. Priya is
-                      approximately 400m ahead.
-                    </p>
-                  </div>
+              <div className={`border rounded-xl p-3 flex gap-2.5 items-start ${
+                isLayer3 ? "bg-amber-50/70 border-amber-100" :
+                isLayer2 ? "bg-indigo-50/70 border-indigo-100" :
+                "bg-blue-50/70 border-blue-100"
+              }`}>
+                <span className={`material-symbols-outlined text-lg mt-0.5 font-bold ${
+                  isLayer3 ? "text-amber-600" : isLayer2 ? "text-indigo-700" : "text-blue-600"
+                }`}>
+                  {isRouting ? "hourglass_empty" : "route"}
+                </span>
+                <div>
+                  <h4 className={`font-bold text-xs ${
+                    isLayer3 ? "text-amber-900" : isLayer2 ? "text-indigo-900" : "text-blue-900"
+                  }`}>
+                    {isRouting ? "Calculating Route..." : "Route Active"}
+                  </h4>
+                  <p className={`text-[10px] leading-relaxed mt-0.5 font-sans ${
+                    isLayer3 ? "text-amber-900/80" : isLayer2 ? "text-indigo-900/80" : "text-blue-900/80"
+                  }`}>
+                    {isLayer2 || isLayer3
+                      ? `Follow the ${isLayer3 ? 'amber' : 'indigo'} route to the search area for ${distressFirstName}.`
+                      : `Follow the blue route line to navigate directly to ${distressFirstName}.`}
+                  </p>
                 </div>
-              ) : isLayer2 ? (
-                /* Privacy Offset Banner for L2 */
-                <div className="bg-indigo-50/70 border border-indigo-100 rounded-xl p-3 flex gap-2.5 items-start">
-                  <span className="material-symbols-outlined text-indigo-700 text-lg mt-0.5">
-                    info
-                  </span>
-                  <div>
-                    <h4 className="font-bold text-xs text-indigo-900">Privacy Notice</h4>
-                    <p className="text-[10px] text-indigo-900/80 leading-relaxed mt-0.5 font-sans">
-                      Approximate location shown for privacy purposes. A 200m circular search
-                      boundary has been highlighted.
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                /* Regular Directions for L1 */
-                <div className="bg-blue-50/70 border border-blue-100 rounded-xl p-3 flex gap-2.5 items-start">
-                  <span className="material-symbols-outlined text-blue-600 text-lg mt-0.5 font-bold">
-                    navigation
-                  </span>
-                  <div>
-                    <h4 className="font-bold text-xs text-blue-900">Directions</h4>
-                    <p className="text-[10px] text-blue-900/80 leading-relaxed mt-0.5 font-sans">
-                      Head North on MG Road towards Residency Road. Proceed 300m, then turn left at
-                      MG Road Metro Hub.
-                    </p>
-                  </div>
-                </div>
-              )}
+              </div>
 
               <div className="flex gap-2.5 mt-1">
                 <button
@@ -716,13 +878,34 @@ function SosReceiverPage() {
                   <span className="material-symbols-outlined text-sm">cancel</span>
                   Abort Response
                 </button>
-                <a
-                  href="tel:+15550000000"
-                  className="flex-1 py-3 bg-[#0d631b] hover:bg-[#0a5215] text-white text-xs font-bold rounded-xl transition flex justify-center items-center gap-1.5 shadow"
+                {distressPhone ? (
+                  <a
+                    href={`tel:${distressPhone}`}
+                    className="flex-1 py-3 bg-[#0d631b] hover:bg-[#0a5215] text-white text-xs font-bold rounded-xl transition flex justify-center items-center gap-1.5 shadow"
+                  >
+                    <span className="material-symbols-outlined text-sm">call</span>
+                    Call {distressFirstName}
+                  </a>
+                ) : (
+                  <button
+                    disabled
+                    title="Phone number unavailable"
+                    className="flex-1 py-3 bg-gray-200 text-gray-500 text-xs font-bold rounded-xl flex justify-center items-center gap-1.5 shadow cursor-not-allowed"
+                  >
+                    <span className="material-symbols-outlined text-sm">phone_disabled</span>
+                    No Number
+                  </button>
+                )}
+              </div>
+
+              <div className="mt-2 w-full">
+                <button
+                  onClick={handleMarkSecure}
+                  className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition active:scale-[0.98] flex justify-center items-center gap-2"
                 >
-                  <span className="material-symbols-outlined text-sm">call</span>
-                  Call Priya
-                </a>
+                  <span className="material-symbols-outlined text-base">verified_user</span>
+                  Mark {distressFirstName} as Secure
+                </button>
               </div>
             </div>
           ) : (
@@ -757,7 +940,7 @@ function SosReceiverPage() {
                     {isLayer3
                       ? "Primary contacts unavailable • Voluntarily response request"
                       : isLayer2
-                        ? `Priya Sharma is a mutual friend of ${mutualContactName}`
+                        ? `${distressName} is a mutual friend of ${mutualContactName}`
                         : `Triggered moments ago · ${distance > 0 ? `${distance} km away · ~${eta} min` : "Locating..."}`}
                   </p>
                 </div>
@@ -767,8 +950,8 @@ function SosReceiverPage() {
                 {isLayer3
                   ? "You are registered as a verified Guardian Angel. Someone nearby needs urgent assistance and no other responders have confirmed. Confirm if you can help."
                   : isLayer2
-                    ? `Priya Sharma triggered an emergency safety alert. Since you are connected via ${mutualContactName}, you have been notified to assist nearby.`
-                    : "Confirm your response to alert Priya and other circle guardians that you are on your way to assist."}
+                    ? `${distressName} triggered an emergency safety alert. Since you are connected via ${mutualContactName}, you have been notified to assist nearby.`
+                    : `Confirm your response to alert ${distressFirstName} and other circle guardians that you are on your way to assist.`}
               </p>
 
               <div className="flex gap-2.5 w-full mt-1.5">

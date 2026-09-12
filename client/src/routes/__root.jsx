@@ -135,70 +135,92 @@ function BottomNav() {
   );
 }
 
-function Sidebar({ user }) {
+function Sidebar({ user, isOpen, onClose }) {
   const avatarUrl = user?.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${user?.name || "U"}&backgroundColor=f97316`;
 
   return (
-    <nav className="hidden md:flex flex-col bg-white text-gray-800 h-full rounded-r-2xl shadow-sm border-r border-gray-150 w-72 max-w-[80vw] p-5 fixed left-0 top-0 z-50">
-      <div className="flex items-center gap-4 mb-8 pt-4">
-        <UserAvatar
-          name={user?.name || "User"}
-          avatarUrl={avatarUrl}
-          sizeClassName="w-12 h-12 text-base font-semibold"
-          className="border border-gray-100"
+    <>
+      {/* Mobile Overlay */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 md:hidden animate-fade-in" 
+          onClick={onClose}
         />
+      )}
 
-        <div>
-          <h2 className="text-sm font-bold text-gray-900">{user?.name || user?.displayName || "User"}</h2>
-          <p className="text-xs text-gray-500">Trust Score: 98</p>
-          <p className="text-xs text-[#0d631b] font-semibold mt-0.5">Safety Status: Protected</p>
+      {/* Sidebar Navigation */}
+      <nav 
+        className={`
+          fixed md:sticky top-0 left-0 z-50 h-screen bg-white text-gray-800 flex flex-col 
+          shadow-lg md:shadow-sm border-r border-gray-150 overflow-y-auto transition-transform duration-300 ease-in-out
+          w-[280px] md:w-[240px] lg:w-[260px] shrink-0
+          ${isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}
+        `}
+      >
+        <div className="flex items-center gap-4 mb-8 p-5 pt-8 md:pt-6">
+          <UserAvatar
+            name={user?.name || "User"}
+            avatarUrl={avatarUrl}
+            sizeClassName="w-12 h-12 text-base font-semibold"
+            className="border border-gray-100"
+          />
+
+          <div className="min-w-0">
+            <h2 className="text-sm font-bold text-gray-900 truncate">{user?.name || user?.displayName || "User"}</h2>
+            <p className="text-xs text-gray-500 truncate">TrustNet Protected</p>
+            <p className="text-xs text-[#0d631b] font-semibold mt-0.5 truncate">Safety Status: Secure</p>
+          </div>
         </div>
-      </div>
-      <ul className="flex flex-col gap-1.5">
-        {[
-          { to: "/settings", label: "Emergency Settings", icon: "settings_ethernet" },
-          { to: "/history", label: "Safety History", icon: "history" },
-          { to: "/privacy", label: "Privacy Guard", icon: "privacy_tip" },
-          { to: "/support", label: "Support", icon: "help" }
-        ].map(item => (
-          <li key={item.to}>
-            <Link
-              to={item.to}
-              className="flex items-center gap-3 px-4 py-2.5 rounded-full transition-all text-sm group"
-              activeProps={{ className: "bg-[#0d631b]/10 text-[#0d631b] font-bold" }}
-              inactiveProps={{ className: "text-gray-600 hover:bg-gray-100 font-medium" }}
-            >
-              <span className="material-symbols-outlined text-lg" style={{ fontVariationSettings: "'FILL' 1" }}>{item.icon}</span>
-              {item.label}
-            </Link>
-          </li>
-        ))}
-      </ul>
-      <div className="mt-auto">
-        <ul className="flex flex-col gap-1.5">
+
+        <ul className="flex flex-col gap-1 px-3">
           {[
-            { to: "/", label: "Home", icon: "home", exact: true },
-            { to: "/heatmap", label: "Heatmap", icon: "map" },
-            { to: "/circle", label: "Circle", icon: "group" },
-            { to: "/guardian", label: "Guardian", icon: "security" },
-            { to: "/profile", label: "Profile", icon: "person" }
+            { to: "/settings", label: "Emergency Settings", icon: "settings_ethernet" },
+            { to: "/history", label: "Safety History", icon: "history" },
+            { to: "/privacy", label: "Privacy Guard", icon: "privacy_tip" },
+            { to: "/support", label: "Support", icon: "help" }
           ].map(item => (
             <li key={item.to}>
               <Link
                 to={item.to}
-                activeOptions={item.exact ? { exact: true } : {}}
-                className="flex items-center gap-3 px-4 py-2.5 rounded-full transition-all text-sm group"
+                onClick={onClose}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-sm group"
                 activeProps={{ className: "bg-[#0d631b]/10 text-[#0d631b] font-bold" }}
                 inactiveProps={{ className: "text-gray-600 hover:bg-gray-100 font-medium" }}
               >
-                <span className="material-symbols-outlined text-lg" style={{ fontVariationSettings: "'FILL' 1" }}>{item.icon}</span>
+                <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>{item.icon}</span>
                 {item.label}
               </Link>
             </li>
           ))}
         </ul>
-      </div>
-    </nav>
+
+        <div className="mt-auto p-3 mb-4">
+          <ul className="flex flex-col gap-1">
+            {[
+              { to: "/", label: "Home", icon: "home", exact: true },
+              { to: "/heatmap", label: "Heatmap", icon: "map" },
+              { to: "/circle", label: "Circle", icon: "group" },
+              { to: "/guardian", label: "Guardian", icon: "security" },
+              { to: "/profile", label: "Profile", icon: "person" }
+            ].map(item => (
+              <li key={item.to}>
+                <Link
+                  to={item.to}
+                  onClick={onClose}
+                  activeOptions={item.exact ? { exact: true } : {}}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-sm group"
+                  activeProps={{ className: "bg-[#0d631b]/10 text-[#0d631b] font-bold" }}
+                  inactiveProps={{ className: "text-gray-600 hover:bg-gray-100 font-medium" }}
+                >
+                  <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>{item.icon}</span>
+                  {item.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </nav>
+    </>
   );
 }
 
@@ -459,9 +481,86 @@ function AuthGate() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const router = useRouter();
   const [sosActive, setSosActive] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Track location in background if enabled
   useLiveLocationTracker();
+
+  const [incomingSOS, setIncomingSOS] = useState(null);
+
+  // Listen for incoming SOS globally
+  useEffect(() => {
+    if (!user) return;
+    
+    let unsubscribe = () => {};
+    
+    const initListener = async () => {
+      const { collection, query, where, onSnapshot } = await import("firebase/firestore");
+      const { db } = await import("../firebase/firebase");
+      
+      const q = query(
+        collection(db, "notifications"),
+        where("receiverUID", "==", user.id),
+        where("read", "==", false)
+      );
+      
+      unsubscribe = onSnapshot(q, (snap) => {
+        snap.docChanges().forEach((change) => {
+          if (change.type === "added") {
+            const data = change.doc.data();
+            if (data.type === "SOS" || data.type === "LAYER2_SOS" || data.type === "LAYER3_SOS") {
+              if (data.deepLink) {
+                // Don't show the global modal if they are already on the receiver page
+                // OR if it's a LAYER3_SOS and they are already on the Guardian dashboard (which has its own alert UI)
+                if (!window.location.href.includes("sos-receiver") && !(data.type === "LAYER3_SOS" && window.location.pathname.includes("/guardian"))) {
+                   setIncomingSOS({ id: change.doc.id, ...data });
+                }
+              }
+            }
+          }
+        });
+      });
+    };
+    
+    initListener();
+    return () => unsubscribe();
+  }, [user]);
+
+  // Listen to the specific SOS session if a modal is open, to auto-update if someone else answers
+  useEffect(() => {
+    if (!incomingSOS) return;
+    
+    let sessionId = incomingSOS.sessionId;
+    if (!sessionId && incomingSOS.deepLink) {
+       const urlParams = new URLSearchParams(incomingSOS.deepLink.split('?')[1]);
+       sessionId = urlParams.get('sessionId');
+    }
+    
+    if (!sessionId) return;
+
+    let unsubscribe = () => {};
+
+    const watchSession = async () => {
+      const { doc, onSnapshot } = await import("firebase/firestore");
+      const { db } = await import("../firebase/firebase");
+      
+      unsubscribe = onSnapshot(doc(db, "sos_sessions", sessionId), (snap) => {
+        if (snap.exists()) {
+          const session = snap.data();
+          if (session.status === "ended" || session.status === "cancelled") {
+            setIncomingSOS(prev => prev ? { ...prev, sessionState: "ended" } : null);
+          } else if (session.responderUID) {
+            setIncomingSOS(prev => prev ? { ...prev, sessionState: "accepted" } : null);
+          }
+        } else {
+          setIncomingSOS(prev => prev ? { ...prev, sessionState: "ended" } : null);
+        }
+      });
+    };
+
+    watchSession();
+    return () => unsubscribe();
+  }, [incomingSOS?.id, user?.id]);
 
   if (!ready) {
     return (
@@ -476,23 +575,31 @@ function AuthGate() {
   if (user && isPublic) return <Navigate to="/" />;
 
   return (
-    <>
-      {user && <Sidebar user={user} />}
-      {user && !pathname.startsWith("/sos") && (
-        <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-gray-200 flex justify-between items-center px-4 h-16 w-full md:hidden">
-          <div className="flex items-center gap-3">
-            <button className="w-10 h-10 flex items-center justify-center rounded-full text-[#0d631b] hover:bg-gray-100 transition">
-              <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>shield_with_heart</span>
-            </button>
-            <h1 className="text-lg font-bold text-gray-900 tracking-tight">TrustNet</h1>
-          </div>
-          <Link to="/notifications" className="w-10 h-10 flex items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 transition">
-            <span className="material-symbols-outlined">notifications</span>
-          </Link>
-        </header>
-      )}
-      <Outlet />
-      {user && <BottomNav />}
+    <div className="flex min-h-screen bg-gray-50/30 w-full">
+      {user && <Sidebar user={user} isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />}
+      <div className="flex-1 flex flex-col min-w-0 w-full relative">
+        {user && !pathname.startsWith("/sos") && (
+          <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-gray-200 flex justify-between items-center px-4 h-16 w-full md:hidden">
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setIsSidebarOpen(true)}
+                className="w-10 h-10 flex items-center justify-center rounded-full text-gray-700 hover:bg-gray-100 transition -ml-1"
+              >
+                <span className="material-symbols-outlined">menu</span>
+              </button>
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[#0d631b]" style={{ fontVariationSettings: "'FILL' 1" }}>shield_with_heart</span>
+                <h1 className="text-lg font-bold text-gray-900 tracking-tight">TrustNet</h1>
+              </div>
+            </div>
+            <Link to="/notifications" className="w-10 h-10 flex items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 transition">
+              <span className="material-symbols-outlined">notifications</span>
+            </Link>
+          </header>
+        )}
+        <Outlet />
+        {user && <BottomNav />}
+      </div>
       <SosHoldOverlay
         active={sosActive}
         onCancel={() => setSosActive(false)}
@@ -501,7 +608,71 @@ function AuthGate() {
           router.navigate({ to: "/sos" });
         }}
       />
-    </>
+      {incomingSOS && (
+        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-scale-in">
+            <div className={`p-4 text-white text-center ${
+              incomingSOS.sessionState === "accepted" ? "bg-blue-600" 
+              : incomingSOS.sessionState === "ended" ? "bg-green-600" 
+              : incomingSOS.type === "LAYER3_SOS" ? "bg-amber-600" // Guardian Orange!
+              : "bg-red-600"
+            }`}>
+              <span className="material-symbols-outlined text-4xl mb-1">
+                {incomingSOS.sessionState === "accepted" ? "handshake" 
+                  : incomingSOS.sessionState === "ended" ? "shield" 
+                  : incomingSOS.type === "LAYER3_SOS" ? "security" // Guardian Icon!
+                  : "emergency_home"}
+              </span>
+              <h2 className="text-lg font-bold">
+                {incomingSOS.sessionState === "accepted" ? "Help is on the way" 
+                  : incomingSOS.sessionState === "ended" ? "User is safe" 
+                  : (incomingSOS.title || "Emergency Alert")}
+              </h2>
+            </div>
+            <div className="p-5 text-center">
+              <p className="text-gray-700 text-sm mb-6">
+                {incomingSOS.sessionState === "accepted"
+                  ? "Another member of the TrustNet network has already accepted this SOS and is responding."
+                  : incomingSOS.sessionState === "ended"
+                  ? "This emergency has been resolved or cancelled by the user."
+                  : (incomingSOS.message || "Someone in your network needs help.")}
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={async () => {
+                    const { markNotificationRead } = await import("../services/readNotification");
+                    markNotificationRead(incomingSOS.id).catch(console.error);
+                    setIncomingSOS(null);
+                  }}
+                  className={`flex-1 py-3 font-bold rounded-xl transition ${
+                    incomingSOS.sessionState ? "bg-gray-100 hover:bg-gray-200 text-gray-700" : "bg-gray-100 hover:bg-gray-200 text-gray-700"
+                  }`}
+                >
+                  Dismiss
+                </button>
+                {!incomingSOS.sessionState && (
+                  <button
+                    onClick={async () => {
+                      const { markNotificationRead } = await import("../services/readNotification");
+                      markNotificationRead(incomingSOS.id).catch(console.error);
+                      router.navigate({ to: incomingSOS.deepLink });
+                      setIncomingSOS(null);
+                    }}
+                    className={`flex-1 py-3 text-white font-bold rounded-xl transition shadow ${
+                      incomingSOS.type === "LAYER3_SOS" 
+                        ? "bg-amber-600 hover:bg-amber-700" 
+                        : "bg-red-600 hover:bg-red-700"
+                    }`}
+                  >
+                    Help Now
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
